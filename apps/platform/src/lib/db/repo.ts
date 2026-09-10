@@ -19,6 +19,8 @@ import type {
   WorldIdVerificationStatus,
   Blockchain,
   TokenNetwork,
+  YieldStreamRecord,
+  YieldStreamStatus,
 } from "@/types";
 import { tokenExplorerUrl } from "@/lib/chains";
 
@@ -1008,4 +1010,169 @@ export function listEvents(tokenId: string, limit = 100): EventRecord[] {
     .prepare("SELECT * FROM events WHERE token_id = ? ORDER BY created_at DESC, id DESC LIMIT ?")
     .all(tokenId, limit) as EventRow[];
   return rows.map(mapEvent);
+}
+
+// --- yield streams (Superfluid continuous cashflow streams) ---
+
+interface YieldStreamRow {
+  id: string;
+  property_id: string;
+  token_address: string;
+  sender: string;
+  receiver: string;
+  flow_rate: string;
+  monthly_rent_usd: number;
+  share_percentage: number;
+  started_at: number;
+  updated_at: number | null;
+  closed_at: number | null;
+  status: string;
+  mode: string;
+  tx_hash: string | null;
+  block_number: number | null;
+  created_at: string;
+}
+
+function mapYieldStream(row: YieldStreamRow): YieldStreamRecord {
+  return {
+    id: row.id,
+    propertyId: row.property_id,
+    tokenAddress: row.token_address,
+    sender: row.sender,
+    receiver: row.receiver,
+    flowRate: row.flow_rate,
+    monthlyRentUsd: row.monthly_rent_usd,
+    sharePercentage: row.share_percentage,
+    startedAt: row.started_at,
+    updatedAt: row.updated_at,
+    closedAt: row.closed_at,
+    status: row.status as YieldStreamStatus,
+    mode: row.mode as "live" | "simulated",
+    txHash: row.tx_hash,
+    blockNumber: row.block_number,
+    createdAt: row.created_at,
+  };
+}
+
+export function upsertYieldStream(stream: {
+  propertyId: string;
+  tokenAddress: string;
+  sender?: string;
+  receiver: string;
+  flowRate: string;
+  monthlyRentUsd?: number;
+  sharePercentage?: number;
+  startedAt?: number;
+  updatedAt?: number | null;
+  closedAt?: number | null;
+  status?: YieldStreamStatus;
+  mode?: "live" | "simulated";
+  txHash?: string | null;
+  blockNumber?: number | null;
+}): YieldStreamRecord {
+  const receiverNormalized = stream.receiver.trim().toLowerCase();
+  const id = `${stream.propertyId}:${receiverNormalized}`;
+  const now = Math.floor(Date.now() / 1000);
+  const startedAt = stream.startedAt ?? now;
+  const sender = stream.sender ?? "0x0000000000000000000000000000000000000000";
+  const status = stream.status ?? "ACTIVE";
+  const mode = stream.mode ?? "simulated";
+  const sharePercentage = stream.sharePercentage ?? 10.0;
+  const monthlyRentUsd = stream.monthlyRentUsd ?? 0;
+
+  getDb()
+    .prepare(`
+      INSERT INTO yield_streams (
+        id, property_id, token_address, sender, receiver, flow_rate,
+        monthly_rent_usd, share_percentage, started_at, updated_at, closed_at,
+        status, mode, tx_hash, block_number
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        token_address = excluded.token_address,
+        sender = excluded.sender,
+        flow_rate = excluded.flow_rate,
+        monthly_rent_usd = excluded.monthly_rent_usd,
+        share_percentage = excluded.share_percentage,
+        updated_at = excluded.updated_at,
+        closed_at = excluded.closed_at,
+        status = excluded.status,
+        mode = excluded.mode,
+        tx_hash = excluded.tx_hash,
+        block_number = excluded.block_number
+    `)
+    .run(
+      id,
+      stream.propertyId,
+      stream.tokenAddress,
+      sender,
+      receiverNormalized,
+      stream.flowRate,
+      monthlyRentUsd,
+      sharePercentage,
+      startedAt,
+      stream.updatedAt ?? now,
+      stream.closedAt ?? null,
+      status,
+      mode,
+      stream.txHash ?? null,
+      stream.blockNumber ?? null
+    );
+
+  return getYieldStream(stream.propertyId, receiverNormalized)!;
+}
+
+export function getYieldStream(propertyId: string, receiver: string): YieldStreamRecord | null {
+  const id = `${propertyId}:${receiver.trim().toLowerCase()}`;
+  const row = getDb().prepare("SELECT * FROM yield_streams WHERE id = ?").get(id) as YieldStreamRow | undefined;
+  return row ? mapYieldStream(row) : null;
+}
+
+export function listYieldStreams(propertyId?: string, receiver?: string): YieldStreamRecord[] {
+  let query = "SELECT * FROM yield_streams";
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  if (propertyId) {
+    where.push("property_id = ?");
+    params.push(propertyId);
+  }
+  if (receiver) {
+    where.push("LOWER(receiver) = ?");
+    params.push(receiver.trim().toLowerCase());
+  }
+  if (where.length > 0) {
+    query += " WHERE " + where.join(" AND ");
+  }
+  query += " ORDER BY created_at DESC";
+
+  const rows = getDb().prepare(query).all(...params) as YieldStreamRow[];
+  return rows.map(mapYieldStream);
+}
+
+export function updateYieldStream(
+  propertyId: string,
+  receiver: string,
+  updates: Partial<YieldStreamRecord>
+): YieldStreamRecord | null {
+  const existing = getYieldStream(propertyId, receiver);
+  if (!existing) return null;
+
+  const merged = { ...existing, ...updates, updatedAt: Math.floor(Date.now() / 1000) };
+  return upsertYieldStream(merged);
+}
+
+export function closeYieldStream(propertyId: string, receiver: string): YieldStreamRecord | null {
+  const existing = getYieldStream(propertyId, receiver);
+  if (!existing) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  getDb()
+    .prepare(`
+      UPDATE yield_streams
+      SET status = 'CLOSED', flow_rate = '0', closed_at = ?, updated_at = ?
+      WHERE id = ?
+    `)
+    .run(now, now, existing.id);
+
+  return getYieldStream(propertyId, receiver);
 }

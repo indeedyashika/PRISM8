@@ -2,12 +2,14 @@
   "prop_456_oak_ave_test:0x70997970c51812dc3a010c7d01b50e0d17dc79c8": {
     "propertyId": "prop_456_oak_ave_test",
     "token": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
+    "tokenAddress": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
     "receiver": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "flowRate": 1466049382716,
     "monthlyRentEquivUsd": 3.8,
-    "startedAt": 1789050211,
+    "startedAt": 1789051281,
     "status": "ACTIVE",
     "txHash": "sim_cfa_create_prop_456_oak_ave_test",
+    "blockNumber": null,
     "mode": "simulated"
   },
   "prop_456_oak_ave:0x70997970c51812dc3a010c7d01b50e0d17dc79c8": {
@@ -19,6 +21,32 @@
     "startedAt": 1789049977,
     "status": "ACTIVE",
     "txHash": "sim_cfa_create_prop_456_oak_ave",
+    "mode": "simulated"
+  },
+  "prop_unit_test_sim:0x70997970c51812dc3a010c7d01b50e0d17dc79c8": {
+    "propertyId": "prop_unit_test_sim",
+    "token": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
+    "tokenAddress": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
+    "receiver": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "flowRate": 1466049382716,
+    "monthlyRentEquivUsd": 3.8,
+    "startedAt": 1789051245,
+    "status": "ACTIVE",
+    "txHash": "sim_cfa_create_prop_unit_test_sim",
+    "blockNumber": null,
+    "mode": "simulated"
+  },
+  "prop_unit_test_dup:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": {
+    "propertyId": "prop_unit_test_dup",
+    "token": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
+    "tokenAddress": "0x42bb40bF79730451B11f6De1CbA222F17b87Afd7",
+    "receiver": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    "flowRate": 1000,
+    "monthlyRentEquivUsd": 2592.0,
+    "startedAt": 1789051247,
+    "status": "ACTIVE",
+    "txHash": "sim_cfa_create_prop_unit_test_dup",
+    "blockNumber": null,
     "mode": "simulated"
   }
 }

@@ -215,5 +215,26 @@ export interface EventRecord {
   createdAt: string;
 }
 
+export type YieldStreamStatus = "ACTIVE" | "PAUSED" | "CLOSED";
+
+export interface YieldStreamRecord {
+  id: string;
+  propertyId: string;
+  tokenAddress: string;
+  sender: string;
+  receiver: string;
+  flowRate: string;
+  monthlyRentUsd: number;
+  sharePercentage: number;
+  startedAt: number;
+  updatedAt?: number | null;
+  closedAt?: number | null;
+  status: YieldStreamStatus;
+  mode: "live" | "simulated";
+  txHash?: string | null;
+  blockNumber?: number | null;
+  createdAt: string;
+}
+
 export * from "./blockchain";
 

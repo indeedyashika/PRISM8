@@ -50,6 +50,7 @@ function openDb(): Database.Database {
   migrateHolderWorldIdProofs(db);
   migrateHolderLivenessState(db);
   migrateWorldIdVerificationQueue(db);
+  migrateYieldStreams(db);
 
   return db;
 }
@@ -196,6 +197,31 @@ function migrateTokenCompliancePolicy(db: Database.Database): void {
   for (const [name, definition] of additions) {
     if (!columns.has(name)) db.exec(`ALTER TABLE tokens ADD COLUMN ${name} ${definition}`);
   }
+}
+
+function migrateYieldStreams(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS yield_streams (
+      id                  TEXT PRIMARY KEY,
+      property_id         TEXT NOT NULL,
+      token_address       TEXT NOT NULL,
+      sender              TEXT NOT NULL,
+      receiver            TEXT NOT NULL,
+      flow_rate           TEXT NOT NULL,
+      monthly_rent_usd    REAL NOT NULL DEFAULT 0,
+      share_percentage    REAL NOT NULL DEFAULT 10.0,
+      started_at          INTEGER NOT NULL,
+      updated_at          INTEGER,
+      closed_at           INTEGER,
+      status              TEXT NOT NULL DEFAULT 'ACTIVE',
+      mode                TEXT NOT NULL DEFAULT 'simulated',
+      tx_hash             TEXT,
+      block_number        INTEGER,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_yield_streams_property ON yield_streams(property_id, status);
+    CREATE INDEX IF NOT EXISTS idx_yield_streams_receiver ON yield_streams(receiver, status);
+  `);
 }
 
 // Cache the connection on `globalThis` so Next.js dev-mode module reloads (and route handler
