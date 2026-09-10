@@ -56,13 +56,23 @@ def _settle_x402_micropayment(challenge: dict[str, Any]) -> str:
     """Autonomously signs and settles a 0.5 HBAR micropayment on Hedera Testnet."""
     invoice_id = challenge.get("invoiceId", "inv_unknown")
     payee = challenge.get("payee", HEDERA_OPERATOR_ID)
-    amount = challenge.get("amount", "50000000")
 
-    # In production/testnet with Hedera operator key, a CryptoTransferTransaction is signed.
-    # We generate a valid Hedera Transaction ID format: <payerAccountId>@<seconds>.<nanoseconds>
-    current_sec = int(time.time())
-    tx_id = f"{HEDERA_OPERATOR_ID}@{current_sec}.{int((time.time() % 1) * 1e9):09d}"
-    return tx_id
+    # Attempt genuine on-chain settlement via platform Hedera SDK
+    try:
+        url = f"{BASE_URL}/api/x402/settle"
+        headers = {"Content-Type": "application/json"}
+        if AGENT_SECRET:
+            headers["X-Tokenization-Agent-Secret"] = AGENT_SECRET
+        res = httpx.post(url, json={"invoiceId": invoice_id, "payee": payee}, headers=headers, timeout=15.0)
+        if res.is_success:
+            data = res.json()
+            if data.get("txId"):
+                return data["txId"]
+    except Exception as exc:
+        print(f"[usps_chainlink] Settle API call failed, falling back to simulated settlement: {exc}")
+
+    # Fallback to clearly labeled simulated transaction ID when offline or unconfigured
+    return f"sim_x402_{invoice_id}"
 
 
 @mcp.tool()

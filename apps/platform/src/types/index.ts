@@ -214,3 +214,6 @@ export interface EventRecord {
   hashscanUrl: string | null;
   createdAt: string;
 }
+
+export * from "./blockchain";
+

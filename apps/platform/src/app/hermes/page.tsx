@@ -57,6 +57,12 @@ export default function HermesConsolePage() {
   const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
   const [timelineEntries, setTimelineEntries] = useState<McpTimelineEntry[]>([]);
   const [viewLayout, setViewLayout] = useState<"split" | "timeline" | "terminal">("split");
+  const [latestAudit, setLatestAudit] = useState<{
+    topicId: string;
+    sequenceNumber?: number;
+    txId?: string;
+    mode?: "live" | "simulated";
+  } | null>(null);
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
@@ -81,7 +87,7 @@ export default function HermesConsolePage() {
     setLogs((prev) => [
       ...prev,
       {
-        id: Math.random().toString(36).slice(2, 9),
+        id: `log-${Date.now()}-${prev.length}`,
         timestamp: new Date().toLocaleTimeString(),
         source,
         content,
@@ -220,6 +226,7 @@ export default function HermesConsolePage() {
                       agentOrServer: evt.mcpServer,
                       tool: evt.mcpTool,
                       status: evt.status as McpActionStatus,
+                      mode: evt.mode || (evt.status === "SIMULATED" ? "simulated" : "live"),
                       shortResult: evt.shortResult || evt.resultSummary,
                       durationMs: evt.durationMs,
                       durationLabel: `${evt.durationMs}ms`,
@@ -254,6 +261,18 @@ export default function HermesConsolePage() {
                 );
               } else if (msg.type === "MISSION_COMPLETE") {
                 const resData = msg.result;
+                if (resData?.auditTrail && Array.isArray(resData.auditTrail)) {
+                  const auditEntry = resData.auditTrail.find((s: any) => s.hcsReceipt || s.receipt);
+                  const rcpt = auditEntry?.hcsReceipt || auditEntry?.receipt;
+                  if (rcpt) {
+                    setLatestAudit({
+                      topicId: rcpt.topicId || "0.0.4491823",
+                      sequenceNumber: rcpt.sequenceNumber,
+                      txId: rcpt.txId,
+                      mode: rcpt.mode || (rcpt.txId?.startsWith("sim_") ? "simulated" : "live"),
+                    });
+                  }
+                }
                 setTimelineEntries((prev) =>
                   prev.map((item) =>
                     item.id === hermesEntryId
@@ -314,12 +333,13 @@ export default function HermesConsolePage() {
         }
 
         if (Array.isArray(data.events)) {
-          const newEntries: McpTimelineEntry[] = data.events.map((evt: any) => ({
-            id: evt.id || `evt-${Date.now()}-${Math.random()}`,
+          const newEntries: McpTimelineEntry[] = data.events.map((evt: any, idx: number) => ({
+            id: evt.id || `evt-${Date.now()}-${idx}`,
             timestamp: new Date(evt.timestamp || Date.now()).toLocaleTimeString(),
             agentOrServer: evt.mcpServer,
             tool: evt.mcpTool,
             status: evt.status || "SUCCESS",
+            mode: evt.mode || (evt.status === "SIMULATED" ? "simulated" : "live"),
             shortResult: evt.shortResult || evt.resultSummary,
             durationMs: evt.durationMs,
             durationLabel: `${evt.durationMs}ms`,
@@ -347,6 +367,17 @@ export default function HermesConsolePage() {
               evt.rawResult
             );
           }
+        if (data.auditTrail && Array.isArray(data.auditTrail)) {
+          const auditEntry = data.auditTrail.find((s: any) => s.hcsReceipt || s.receipt);
+          const rcpt = auditEntry?.hcsReceipt || auditEntry?.receipt;
+          if (rcpt) {
+            setLatestAudit({
+              topicId: rcpt.topicId || "0.0.4491823",
+              sequenceNumber: rcpt.sequenceNumber,
+              txId: rcpt.txId,
+              mode: rcpt.mode || (rcpt.txId?.startsWith("sim_") ? "simulated" : "live"),
+            });
+          }
         }
 
         if (data.summary) {
@@ -356,7 +387,8 @@ export default function HermesConsolePage() {
           });
         }
       }
-    } catch (err: any) {
+    }
+  } catch (err: any) {
       setTimelineEntries((prev) =>
         prev.map((item) =>
           item.id === hermesEntryId
@@ -796,14 +828,28 @@ export default function HermesConsolePage() {
           </div>
         </div>
 
-        {/* HCS Verifiable Audit Stream Preview */}
+        {/* HCS Verifiable Audit Stream */}
         <div className="border border-neutral-300 bg-white p-6 shadow-sm">
-          <h3 className="text-base font-bold text-black mb-3">Live Hedera Consensus Audit Receipt</h3>
-          <HcsAuditBadge
-            topicId="0.0.4491823"
-            sequenceNumber={83526}
-            txId="0.0.4491823@1788783526.000000000"
-          />
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-bold text-black">Hedera Consensus Audit Trail (HCS)</h3>
+            <span className="text-xs text-neutral-500 font-mono">Consensus Topic: 0.0.4491823</span>
+          </div>
+          {latestAudit ? (
+            <HcsAuditBadge
+              topicId={latestAudit.topicId}
+              sequenceNumber={latestAudit.sequenceNumber}
+              txId={latestAudit.txId}
+              mode={latestAudit.mode}
+            />
+          ) : (
+            <div className="p-4 bg-neutral-50 border border-dashed border-neutral-300 text-xs text-neutral-600 flex items-center justify-between">
+              <div>
+                <span className="font-semibold text-neutral-800 block">Awaiting Mission Execution</span>
+                <span>Audit receipts are cryptographically anchored on Hedera Consensus Service during mission execution.</span>
+              </div>
+              <span className="px-2 py-1 bg-neutral-200 text-neutral-700 font-mono text-[10px]">READY</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

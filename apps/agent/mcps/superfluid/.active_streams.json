@@ -5,9 +5,10 @@
     "receiver": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "flowRate": 1466049382716,
     "monthlyRentEquivUsd": 3.8,
-    "startedAt": 1789048982,
+    "startedAt": 1789050211,
     "status": "ACTIVE",
-    "txHash": "0x6aa2b896abc060b2dc3dfe9d621ebebfed515413bc7686cd"
+    "txHash": "sim_cfa_create_prop_456_oak_ave_test",
+    "mode": "simulated"
   },
   "prop_456_oak_ave:0x70997970c51812dc3a010c7d01b50e0d17dc79c8": {
     "propertyId": "prop_456_oak_ave",
@@ -15,8 +16,9 @@
     "receiver": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "flowRate": 1620370370370,
     "monthlyRentEquivUsd": 4.2,
-    "startedAt": 1789048365,
+    "startedAt": 1789049977,
     "status": "ACTIVE",
-    "txHash": "0x6aa2b62dfd611237c0a77a2f7b90957b580a1a7b4ca0974c"
+    "txHash": "sim_cfa_create_prop_456_oak_ave",
+    "mode": "simulated"
   }
 }

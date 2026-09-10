@@ -13,6 +13,7 @@ import { getOperatorClient, getOperatorId, getOperatorKey } from "./client";
 import { hashscanTxUrl } from "./format";
 
 export interface ScheduledYieldPayoutResult {
+  mode: "live" | "simulated";
   scheduleId: string;
   propertyId: string;
   tokenId: string;
@@ -20,7 +21,7 @@ export interface ScheduledYieldPayoutResult {
   totalPayoutAmount: number;
   scheduledExecutionTime: string;
   txId: string;
-  hashscanUrl: string;
+  hashscanUrl?: string;
 }
 
 export interface YieldRecipient {
@@ -75,6 +76,7 @@ export async function scheduleRecurringYieldPayout(
     const txIdStr = scheduleTx.transactionId.toString();
 
     return {
+      mode: "live",
       scheduleId: scheduleIdStr,
       propertyId,
       tokenId: payoutTokenId,
@@ -85,18 +87,20 @@ export async function scheduleRecurringYieldPayout(
       hashscanUrl: hashscanTxUrl(txIdStr),
     };
   } catch (error) {
-    // Fallback simulation for offline testing
-    const mockId = `0.0.${Math.floor(Date.now() / 1000) % 900000 + 100000}`;
-    const mockTxId = `0.0.operator@${Math.floor(Date.now() / 1000)}.000000000`;
+    if (process.env.HEDERA_OPERATOR_KEY) {
+      console.error("[ScheduledYield] Live schedule transaction error:", error);
+    }
+    // Simulation mode: clearly mark as simulated and NEVER fabricate a HashScan URL
     return {
-      scheduleId: mockId,
+      mode: "simulated",
+      scheduleId: "sim_sched_hip423",
       propertyId,
       tokenId: payoutTokenId,
       recipientCount: recipients.length,
       totalPayoutAmount: totalAmount,
       scheduledExecutionTime: executionTime.toISOString(),
-      txId: mockTxId,
-      hashscanUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(mockTxId)}`,
+      txId: "sim_tx_scheduled_payout",
+      hashscanUrl: undefined,
     };
   }
 }

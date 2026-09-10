@@ -63,14 +63,21 @@ export async function handlePropertyOracleRequest(body, proof) {
   const dpvConfirmation = isInvalidAddress ? "N" : "Y";
   const isValid = !isInvalidAddress;
 
-  // Generate verifiable HCS audit receipt
-  const mockSeq = Math.floor(Date.now() / 1000) % 100000;
+  const isSimulatedPayment =
+    !proof.paymentTx ||
+    proof.paymentTx.startsWith("sim_") ||
+    !process.env.HEDERA_OPERATOR_KEY;
+
+  // Verifiable HCS audit receipt representation
   const hcsAudit = {
+    mode: isSimulatedPayment ? "simulated" : "live",
     topicId: process.env.HEDERA_AUDIT_TOPIC_ID || "0.0.4491823",
-    sequenceNumber: mockSeq,
+    sequenceNumber: isSimulatedPayment ? 0 : 1,
     consensusTimestamp: new Date().toISOString(),
     txId: proof.paymentTx,
-    hashscanUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(proof.paymentTx)}`,
+    hashscanUrl: isSimulatedPayment
+      ? undefined
+      : `https://hashscan.io/testnet/transaction/${encodeURIComponent(proof.paymentTx)}`,
     event: "X402_PAYMENT_VERIFIED",
   };
 

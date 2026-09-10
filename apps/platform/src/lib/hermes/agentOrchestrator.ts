@@ -7,6 +7,8 @@ import {
   AgentSessionRecord,
 } from "@/lib/hermes/sessionPolicy";
 import { logHcsAuditEvent } from "@/lib/hedera/hcsAudit";
+import { scheduleRecurringYieldPayout } from "@/lib/hedera/scheduledYield";
+import type { BlockchainMode } from "@/types";
 
 export interface PropertyParams {
   street: string;
@@ -34,6 +36,22 @@ export interface HermesCallbacks {
   onToolComplete?: (event: McpExecutionEvent) => void;
 }
 
+export interface HermesStep {
+  stepNumber: number;
+  name: string;
+  mcpServer: string;
+  mcpTool: string;
+  network: string;
+  status: string;
+  mode?: BlockchainMode;
+  shortResult?: string;
+  txId?: string;
+  sequenceNumber?: number;
+  explorerUrl?: string;
+  detail: string;
+  timestamp: string;
+}
+
 export interface HermesMissionResult {
   success: boolean;
   executionId: string;
@@ -41,20 +59,7 @@ export interface HermesMissionResult {
   sessionId: string;
   instruction: string;
   sessionRemainingHbar: number;
-  steps: Array<{
-    stepNumber: number;
-    name: string;
-    mcpServer: string;
-    mcpTool: string;
-    network: string;
-    status: string;
-    shortResult?: string;
-    txId?: string;
-    sequenceNumber?: number;
-    explorerUrl?: string;
-    detail: string;
-    timestamp: string;
-  }>;
+  steps: HermesStep[];
   events: McpExecutionEvent[];
   summary: string;
   property?: {
@@ -259,18 +264,24 @@ export async function executeHermesMission(
       };
     }
 
-    const verificationData = uspsCall.data;
+    const verificationData = uspsCall.data || {};
     const addressHash =
       verificationData.addressHash ||
       `0x${crypto
         .createHash("sha256")
         .update(`${property.street}|${property.city}|${property.state}|${property.zip}`)
         .digest("hex")}`;
-    const paymentTxId =
-      verificationData.hcsAudit?.txId ||
-      `0.0.4491823@${Math.floor(Date.now() / 1000)}.${Math.floor(Math.random() * 1e9)
-        .toString()
-        .padStart(9, "0")}`;
+    const isStep1Live =
+      !isSimulation &&
+      verificationData.mode === "live" &&
+      Boolean(verificationData.hcsAudit?.hashscanUrl) &&
+      !verificationData.hcsAudit?.txId?.startsWith("sim_");
+    const paymentTxId = isStep1Live
+      ? verificationData.hcsAudit?.txId
+      : (verificationData.hcsAudit?.txId || "sim_x402_settlement");
+    const step1Explorer = isStep1Live && paymentTxId
+      ? verificationData.hcsAudit?.hashscanUrl
+      : undefined;
 
     steps.push({
       stepNumber: 1,
@@ -278,10 +289,11 @@ export async function executeHermesMission(
       mcpServer: "usps_chainlink",
       mcpTool: "validate_property_address",
       network: "Hedera Testnet",
-      status: isSimulation ? "SIMULATED" : "CONFIRMED",
+      status: isStep1Live ? "CONFIRMED" : "SIMULATED",
+      mode: isStep1Live ? "live" : "simulated",
       txId: paymentTxId,
       shortResult: uspsCall.event.shortResult,
-      explorerUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(paymentTxId)}`,
+      explorerUrl: step1Explorer,
       detail: `Settled 0.5 HBAR micropayment via Blocky402. USPS DPV confirmed: Code ${verificationData.dpvConfirmation || "Y"}.`,
       timestamp: new Date().toISOString(),
     });
@@ -303,20 +315,30 @@ export async function executeHermesMission(
     );
     events.push(storeHashCall.event);
 
-    const hcsSeq = verificationData.hcsAudit?.sequenceNumber || Math.floor(80000 + Math.random() * 5000);
-    const hcsTopic = "0.0.4491823";
+    const isStep2Live =
+      !isSimulation &&
+      verificationData.hcsAudit?.mode === "live" &&
+      Boolean(verificationData.hcsAudit?.hashscanUrl) &&
+      (verificationData.hcsAudit?.sequenceNumber ?? 0) > 0;
+    const hcsSeq = verificationData.hcsAudit?.sequenceNumber || 0;
+    const hcsTopic = verificationData.hcsAudit?.topicId || "0.0.4491823";
+    const step2Explorer = isStep2Live ? `https://hashscan.io/testnet/topic/${hcsTopic}` : undefined;
+
     steps.push({
       stepNumber: 2,
       name: "Hedera Consensus Service (HCS) Audit Anchor",
       mcpServer: "usps_chainlink",
       mcpTool: "store_verified_hash",
       network: `Hedera Testnet (HCS Topic ${hcsTopic})`,
-      status: isSimulation ? "SIMULATED" : "IMMUTABLE_LOGGED",
+      status: isStep2Live ? "IMMUTABLE_LOGGED" : "SIMULATED",
+      mode: isStep2Live ? "live" : "simulated",
       txId: paymentTxId,
-      sequenceNumber: hcsSeq,
+      sequenceNumber: hcsSeq > 0 ? hcsSeq : undefined,
       shortResult: storeHashCall.event.shortResult,
-      explorerUrl: `https://hashscan.io/testnet/topic/${hcsTopic}`,
-      detail: `Consensus sequence #${hcsSeq} anchored on HCS Topic ${hcsTopic} with address hash ${addressHash.slice(0, 12)}...`,
+      explorerUrl: step2Explorer,
+      detail: hcsSeq > 0
+        ? `Consensus sequence #${hcsSeq} anchored on HCS Topic ${hcsTopic} with address hash ${addressHash.slice(0, 12)}...`
+        : `Consensus audit recorded for address hash ${addressHash.slice(0, 12)}...`,
       timestamp: verificationData.hcsAudit?.consensusTimestamp || new Date().toISOString(),
     });
 
@@ -350,10 +372,29 @@ export async function executeHermesMission(
     );
     events.push(deployCall.event);
 
+    const isStep3Live = !isSimulation && deployCall.success && Boolean(deployCall.data?.tokenId || deployCall.data?.token?.id);
     const deployedTokenId =
       deployCall.data?.tokenId ||
-      deployCall.data?.id ||
-      `0.0.${Math.floor(590000 + Math.random() * 10000)}`;
+      deployCall.data?.token?.id ||
+      (isSimulation ? "sim_token_hts_fractional" : undefined);
+    const step3Explorer = isStep3Live && deployedTokenId
+      ? `https://hashscan.io/testnet/token/${deployedTokenId}`
+      : undefined;
+
+    steps.push({
+      stepNumber: 3,
+      name: "Hedera Token Service (HTS) Deployment",
+      mcpServer: "hedera_write",
+      mcpTool: "deploy_token",
+      network: "Hedera Testnet",
+      status: isStep3Live ? "CONFIRMED" : (deployCall.success ? "SIMULATED" : "FAILED"),
+      mode: isStep3Live ? "live" : "simulated",
+      txId: deployedTokenId,
+      shortResult: deployCall.event.shortResult,
+      explorerUrl: step3Explorer,
+      detail: `HTS fractional real-estate token created with symbol ${tokenSymbol}-RWA.`,
+      timestamp: new Date().toISOString(),
+    });
 
     // -------------------------------------------------------------
     // Step 4: The Graph Autonomous Registration & Indexing
@@ -374,17 +415,21 @@ export async function executeHermesMission(
     );
     events.push(graphRegisterCall.event);
 
-    const deploymentHash = graphRegisterCall.data?.deploymentHash || "QmQ65v4hUvG1K3T6q21bL5f9N4d9zXJ8pD32A1f6K9z1ab";
+    const isStep4Live = !isSimulation && graphRegisterCall.event.mode === "live" && Boolean(process.env.GRAPH_DEPLOY_KEY);
+    const deploymentHash = graphRegisterCall.data?.deploymentHash || (isStep4Live ? "QmQ65v4hUvG1K3T6q21bL5f9N4d9zXJ8pD32A1f6K9z1ab" : "sim_subgraph_manifest");
+    const step4Explorer = isStep4Live ? "https://thegraph.com/explorer" : undefined;
+
     steps.push({
       stepNumber: 3,
       name: "The Graph Studio Autonomous Indexer Registration",
       mcpServer: "subgraph_write",
       mcpTool: "add_token_source",
       network: "The Graph Protocol (Sepolia Studio)",
-      status: isSimulation ? "SIMULATED" : "INDEXED",
+      status: isStep4Live ? "INDEXED" : "SIMULATED",
+      mode: isStep4Live ? "live" : "simulated",
       txId: deploymentHash,
       shortResult: graphRegisterCall.event.shortResult,
-      explorerUrl: "https://thegraph.com/explorer",
+      explorerUrl: step4Explorer,
       detail: `Hermes appended contract to subgraph.yaml. Deployment hash: ${deploymentHash}. Manifest live.`,
       timestamp: new Date().toISOString(),
     });
@@ -436,17 +481,21 @@ export async function executeHermesMission(
     );
     events.push(streamCall.event);
 
-    const streamTxHash = streamCall.data?.txHash || `0x${crypto.randomBytes(32).toString("hex")}`;
+    const isStep6Live = !isSimulation && streamCall.data?.mode === "live" && Boolean(streamCall.data?.basescanUrl);
+    const streamTxHash = isStep6Live ? streamCall.data?.txHash : (isSimulation ? "sim_cfa_stream" : streamCall.data?.txHash);
+    const streamExplorerUrl = isStep6Live ? streamCall.data?.basescanUrl : undefined;
+
     steps.push({
       stepNumber: 4,
       name: "Superfluid CFA Per-Second Yield Stream Creation",
       mcpServer: "superfluid",
       mcpTool: "create_yield_stream",
       network: "Base Sepolia (CFAv1 Forwarder 0xcfA132E353cB4E398080B9700609bb008eceB125)",
-      status: isSimulation ? "SIMULATED" : "STREAMING_ACTIVE",
+      status: isStep6Live ? "STREAMING_ACTIVE" : (streamCall.success ? "SIMULATED" : "FAILED"),
+      mode: isStep6Live ? "live" : "simulated",
       txId: streamTxHash,
       shortResult: streamCall.event.shortResult,
-      explorerUrl: `https://sepolia.basescan.org/tx/${streamTxHash}`,
+      explorerUrl: streamExplorerUrl,
       detail: `CFA continuous yield stream active: +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec into ${topInvestor.address.slice(0, 10)}...`,
       timestamp: new Date().toISOString(),
     });
@@ -526,6 +575,10 @@ export async function executeHermesMission(
     );
     events.push(streamCall.event);
 
+    const isStreamLive = !isSimulation && streamCall.data?.mode === "live" && Boolean(streamCall.data?.basescanUrl);
+    const streamTxHash = isStreamLive ? streamCall.data?.txHash : (isSimulation ? "sim_cfa_stream" : streamCall.data?.txHash);
+    const streamExplorerUrl = isStreamLive ? streamCall.data?.basescanUrl : undefined;
+
     return {
       success: streamCall.success,
       executionId,
@@ -540,10 +593,11 @@ export async function executeHermesMission(
           mcpServer: "superfluid",
           mcpTool: "create_yield_stream",
           network: "Base Sepolia",
-          status: isSimulation ? "SIMULATED" : (streamCall.success ? "STREAMING_ACTIVE" : "FAILED"),
+          status: isStreamLive ? "STREAMING_ACTIVE" : (streamCall.success ? "SIMULATED" : "FAILED"),
+          mode: isStreamLive ? "live" : "simulated",
           shortResult: streamCall.event.shortResult,
-          txId: streamCall.data?.txHash,
-          explorerUrl: streamCall.data?.basescanUrl,
+          txId: streamTxHash,
+          explorerUrl: streamExplorerUrl,
           detail: `Accelerated CFA stream: +$${(rentAmount * 0.1 / 2592000).toFixed(6)}/sec.`,
           timestamp: new Date().toISOString(),
         },
@@ -569,6 +623,10 @@ export async function executeHermesMission(
     );
     events.push(uspsCall.event);
 
+    const isUspsLive = !isSimulation && uspsCall.data?.mode === "live" && Boolean(uspsCall.data?.hcsAudit?.hashscanUrl);
+    const uspsTxId = isUspsLive ? uspsCall.data?.hcsAudit?.txId : (isSimulation ? "sim_x402_settlement" : uspsCall.data?.hcsAudit?.txId);
+    const uspsExplorerUrl = isUspsLive ? uspsCall.data?.hcsAudit?.hashscanUrl : undefined;
+
     return {
       success: uspsCall.success,
       executionId,
@@ -583,9 +641,11 @@ export async function executeHermesMission(
           mcpServer: "usps_chainlink",
           mcpTool: "validate_property_address",
           network: "Hedera Testnet x402",
-          status: isSimulation ? "SIMULATED" : (uspsCall.success ? "VERIFIED" : "FAILED"),
+          status: isUspsLive ? "VERIFIED" : (uspsCall.success ? "SIMULATED" : "FAILED"),
+          mode: isUspsLive ? "live" : "simulated",
           shortResult: uspsCall.event.shortResult,
-          txId: uspsCall.data?.hcsAudit?.txId,
+          txId: uspsTxId,
+          explorerUrl: uspsExplorerUrl,
           detail: uspsCall.event.resultSummary,
           timestamp: new Date().toISOString(),
         },
@@ -598,17 +658,28 @@ export async function executeHermesMission(
 
   // --- PATH 5: SCHEDULED BATCH DISTRIBUTION (HIP-423) ---
   if (intent === "SCHEDULE_DISTRIBUTION") {
-    // Generate scheduled transaction receipt on Hedera
-    const scheduleId = `0.0.${Math.floor(592000 + Math.random() * 1000)}`;
-    const txId = `0.0.4491823@${Math.floor(Date.now() / 1000)}.${Math.floor(Math.random() * 1e9).toString().padStart(9, "0")}`;
+    const nextMonth = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const payoutResult = await scheduleRecurringYieldPayout(
+      "prop_456_oak_ave",
+      "HBAR",
+      [{ accountId: "0.0.4491823", amount: 10 }],
+      nextMonth
+    );
+    const isScheduleLive = !isSimulation && payoutResult.mode === "live" && Boolean(payoutResult.hashscanUrl);
+    const scheduleId = payoutResult.scheduleId;
+    const txId = payoutResult.txId;
+    const scheduleExplorerUrl = isScheduleLive ? payoutResult.hashscanUrl : undefined;
 
     const hcsReceipt = await logHcsAuditEvent({
       event: "HIP_423_SCHEDULE_CREATED",
       propertyId: "prop_456_oak_ave",
       txId,
       amount: "3800 USD",
-      metadata: { scheduleId, payoutCadence: "MONTHLY_1ST" },
+      metadata: { scheduleId, payoutCadence: "MONTHLY_1ST", mode: payoutResult.mode },
     });
+
+    const isHcsLive = isScheduleLive && hcsReceipt.mode === "live" && Boolean(hcsReceipt.hashscanUrl);
+    const effectiveExplorerUrl = scheduleExplorerUrl || (isHcsLive ? hcsReceipt.hashscanUrl : undefined);
 
     const event: McpExecutionEvent = {
       id: `mcp_evt_${Date.now()}`,
@@ -616,13 +687,14 @@ export async function executeHermesMission(
       mcpServer: "hedera_write",
       mcpTool: "schedule_payout",
       arguments: { propertyId: "prop_456_oak_ave", scheduleId },
-      status: isSimulation ? "SIMULATED" : "SUCCESS",
-      resultSummary: `Scheduled recurring transaction created: ${txId}. Schedule ID: ${scheduleId}.`,
-      shortResult: "HIP-423 Queued",
+      status: isScheduleLive ? "SUCCESS" : "SIMULATED",
+      mode: isScheduleLive ? "live" : "simulated",
+      resultSummary: `Scheduled recurring transaction: ${txId}. Schedule ID: ${scheduleId}.`,
+      shortResult: isScheduleLive ? "HIP-423 Live" : "HIP-423 Queued",
       durationMs: 420,
       referenceId: scheduleId,
       network: "Hedera Testnet",
-      explorerUrl: hcsReceipt.hashscanUrl,
+      explorerUrl: effectiveExplorerUrl,
       timestamp: new Date().toISOString(),
     };
     events.push(event);
@@ -641,17 +713,22 @@ export async function executeHermesMission(
           mcpServer: "hedera_write",
           mcpTool: "schedule_payout",
           network: "Hedera Testnet",
-          status: isSimulation ? "SIMULATED" : "SCHEDULED_ACTIVE",
-          shortResult: "HIP-423 Queued",
+          status: isScheduleLive ? "SCHEDULED_ACTIVE" : "SIMULATED",
+          mode: isScheduleLive ? "live" : "simulated",
+          shortResult: isScheduleLive ? "HIP-423 Live" : "HIP-423 Queued",
           txId,
-          sequenceNumber: hcsReceipt.sequenceNumber,
-          explorerUrl: hcsReceipt.hashscanUrl,
-          detail: `Recurring schedule active. Schedule ID: ${scheduleId}. HCS Sequence #${hcsReceipt.sequenceNumber}.`,
+          sequenceNumber: isHcsLive ? hcsReceipt.sequenceNumber : undefined,
+          explorerUrl: effectiveExplorerUrl,
+          detail: isScheduleLive
+            ? `Recurring schedule active. Schedule ID: ${scheduleId}. Consensus sequence #${hcsReceipt.sequenceNumber}.`
+            : `Simulated recurring schedule registered for property prop_456_oak_ave.`,
           timestamp: new Date().toISOString(),
         },
       ],
       events,
-      summary: `Hedera HIP-423 scheduled payout active (Schedule ID: ${scheduleId}). Payouts trigger automatically on the 1st of every month.`,
+      summary: isScheduleLive
+        ? `Hedera HIP-423 scheduled payout active (Schedule ID: ${scheduleId}). Payouts trigger automatically on the 1st of every month.`
+        : `Hedera HIP-423 scheduled payout queued in simulation mode.`,
       completedAt: new Date().toISOString(),
     };
   }

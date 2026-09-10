@@ -9,6 +9,7 @@ export interface McpTimelineEntry {
   agentOrServer: string; // e.g. "HERMES", "usps_chainlink", "hedera_write", etc.
   tool: string; // e.g. "validate_property_address", "deploy_token"
   status: McpActionStatus;
+  mode?: "live" | "simulated";
   shortResult: string; // e.g. "DPV = Y", "0.5 HBAR", "0.0001466/sec"
   durationMs?: number;
   durationLabel?: string; // e.g. "241ms", "1.2s"
@@ -111,20 +112,13 @@ export function McpActivityTimeline({
   }, [entries]);
 
   // Status badge style helper
-  const getStatusBadge = (status: McpActionStatus) => {
+  const getStatusBadge = (status: McpActionStatus, mode?: "live" | "simulated") => {
     switch (status) {
       case "RUNNING":
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold bg-neutral-950 text-neutral-100 border border-neutral-700 animate-pulse">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
             RUNNING
-          </span>
-        );
-      case "SUCCESS":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
-            <span className="text-emerald-600 font-bold">✓</span>
-            SUCCESS
           </span>
         );
       case "FAILED":
@@ -143,15 +137,25 @@ export function McpActivityTimeline({
         );
       case "SIMULATED":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
-            <span className="text-purple-600 font-bold">◇</span>
-            SIMULATED
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-300">
+            <span className="text-neutral-500 font-bold">◇</span>
+            SIMULATION
           </span>
         );
+      case "SUCCESS":
       default:
+        if (mode === "simulated") {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-300">
+              <span className="text-neutral-500 font-bold">◇</span>
+              SIMULATION
+            </span>
+          );
+        }
         return (
-          <span className="px-2 py-0.5 text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-300">
-            {status}
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            ON-CHAIN
           </span>
         );
     }
@@ -358,7 +362,7 @@ export function McpActivityTimeline({
 
                   {/* Status Badge */}
                   <div className="col-span-2 whitespace-nowrap">
-                    {getStatusBadge(entry.status)}
+                    {getStatusBadge(entry.status, entry.mode)}
                   </div>
 
                   {/* Short Result */}
@@ -380,6 +384,27 @@ export function McpActivityTimeline({
                 {/* Expandable Technical Details Drawer */}
                 {isExpanded && (
                   <div className="px-4 py-3 bg-neutral-50 border-t border-dashed border-neutral-200 text-[11px] space-y-2.5 ml-0 md:ml-6 mb-2 mr-2 border-l-2 border-l-black">
+                    {/* Execution Mode Banner */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-neutral-200">
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="text-neutral-500">Execution Mode:</span>
+                        {entry.mode === "live" && entry.status !== "FAILED" ? (
+                          <span className="px-1.5 py-0.5 font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                            ● ON-CHAIN (Verified Provider Receipt)
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 font-bold bg-neutral-100 text-neutral-700 border border-neutral-300">
+                            ◇ SIMULATION (No on-chain transaction broadcast)
+                          </span>
+                        )}
+                      </div>
+                      {entry.explorerUrl && (
+                        <span className="text-[10px] text-emerald-700 font-semibold">
+                          Verified Explorer Anchor
+                        </span>
+                      )}
+                    </div>
+
                     {/* Action Description */}
                     {entry.actionLabel && (
                       <div className="text-black font-bold flex items-center gap-2">
@@ -412,7 +437,7 @@ export function McpActivityTimeline({
                             </a>
                           ) : (
                             <span className="font-semibold text-black font-mono">
-                              {entry.referenceId}
+                              {entry.referenceId} {entry.mode === "simulated" ? "(Simulation)" : ""}
                             </span>
                           )}
                         </div>

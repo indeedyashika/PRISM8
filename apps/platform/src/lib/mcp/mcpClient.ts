@@ -15,6 +15,7 @@ export interface McpExecutionEvent {
   mcpTool: string;
   arguments: Record<string, unknown>;
   status: McpActionStatus;
+  mode?: "live" | "simulated";
   resultSummary: string;
   shortResult: string;
   durationMs: number;
@@ -178,9 +179,17 @@ export function deriveNetwork(server: string, tool: string): string {
   return "Hermes Network";
 }
 
-/** Derive explorer URL where applicable. */
-export function deriveExplorerUrl(network: string, referenceId?: string): string | undefined {
-  if (!referenceId) return undefined;
+/** Derive explorer URL where applicable. Strictly returns undefined for simulated/synthetic IDs. */
+export function deriveExplorerUrl(network: string, referenceId?: string, mode?: "live" | "simulated"): string | undefined {
+  if (!referenceId || mode === "simulated") return undefined;
+  if (
+    referenceId.startsWith("sim_") ||
+    referenceId.startsWith("mock_") ||
+    referenceId.includes("unknown") ||
+    referenceId.includes("undefined")
+  ) {
+    return undefined;
+  }
   if (network.includes("Base Sepolia") || (referenceId.startsWith("0x") && referenceId.length === 66)) {
     return `https://sepolia.basescan.org/tx/${referenceId}`;
   }
@@ -284,7 +293,13 @@ export async function callMcpTool<T = any>(
     const summary = deriveResultSummary(serverName, toolName, parsed);
     const shortResult = deriveShortResult(serverName, toolName, parsed, false);
     const network = deriveNetwork(serverName, toolName);
-    const explorerUrl = deriveExplorerUrl(network, referenceId);
+    const isSimulated =
+      parsed?.mode === "simulated" ||
+      parsed?.status === "SIMULATED" ||
+      (typeof referenceId === "string" && (referenceId.startsWith("sim_") || referenceId.startsWith("mock_")));
+    const mode: "live" | "simulated" = isSimulated ? "simulated" : "live";
+    const status: McpActionStatus = isSimulated ? "SIMULATED" : "SUCCESS";
+    const explorerUrl = deriveExplorerUrl(network, referenceId, mode);
 
     const event: McpExecutionEvent = {
       id: eventId,
@@ -292,7 +307,8 @@ export async function callMcpTool<T = any>(
       mcpServer: serverName,
       mcpTool: toolName,
       arguments: sanitizeArguments(args),
-      status: "SUCCESS",
+      status,
+      mode,
       resultSummary: summary,
       shortResult,
       durationMs,
@@ -461,7 +477,14 @@ async function handleSubgraphMcpTool<T = any>(
     const referenceId = extractReferenceId(resultData);
     const shortResult = deriveShortResult(serverName, toolName, resultData, false);
     const network = deriveNetwork(serverName, toolName);
-    const explorerUrl = deriveExplorerUrl(network, referenceId);
+    const isSimulated =
+      resultData?.mode === "simulated" ||
+      resultData?.status === "SIMULATED" ||
+      !Boolean(process.env.GRAPH_DEPLOY_KEY) ||
+      (typeof referenceId === "string" && (referenceId.startsWith("sim_") || referenceId.startsWith("mock_")));
+    const mode: "live" | "simulated" = isSimulated ? "simulated" : "live";
+    const status: McpActionStatus = isSimulated ? "SIMULATED" : "SUCCESS";
+    const explorerUrl = deriveExplorerUrl(network, referenceId, mode);
 
     const event: McpExecutionEvent = {
       id: meta.eventId,
@@ -469,7 +492,8 @@ async function handleSubgraphMcpTool<T = any>(
       mcpServer: serverName,
       mcpTool: toolName,
       arguments: sanitizeArguments(args),
-      status: "SUCCESS",
+      status,
+      mode,
       resultSummary: summary,
       shortResult,
       durationMs,

@@ -21,11 +21,12 @@ export interface HcsAuditEventPayload {
 }
 
 export interface HcsAuditReceipt {
+  mode: "live" | "simulated";
   topicId: string;
   sequenceNumber: number;
   consensusTimestamp: string;
   txId: string;
-  hashscanUrl: string;
+  hashscanUrl?: string;
   event: string;
 }
 
@@ -79,6 +80,7 @@ export async function logHcsAuditEvent(payload: HcsAuditEventPayload): Promise<H
     const txIdStr = tx.transactionId.toString();
 
     return {
+      mode: "live",
       topicId: topicIdStr,
       sequenceNumber,
       consensusTimestamp,
@@ -87,15 +89,20 @@ export async function logHcsAuditEvent(payload: HcsAuditEventPayload): Promise<H
       event: payload.event,
     };
   } catch (error) {
-    // Fallback deterministic receipt for simulated test environments
-    const mockSeq = Math.floor(Date.now() / 1000) % 100000;
-    const mockTxId = payload.txId ?? `0.0.4491823@${Math.floor(Date.now() / 1000)}.000000000`;
+    // If running in simulation or without live operator credentials, mark explicitly as SIMULATED
+    // NEVER produce a fake HashScan URL for a synthetic/simulated transaction.
+    const isOfflineOrUnconfigured = !process.env.HEDERA_OPERATOR_KEY;
+    if (!isOfflineOrUnconfigured) {
+      console.error("[HCS] Live audit submission error:", error);
+    }
+    const simulatedTxId = payload.txId || "sim_hcs_topic_audit";
     return {
+      mode: "simulated",
       topicId: topicIdStr,
-      sequenceNumber: mockSeq,
+      sequenceNumber: 0,
       consensusTimestamp: timestamp,
-      txId: mockTxId,
-      hashscanUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(mockTxId)}`,
+      txId: simulatedTxId,
+      hashscanUrl: undefined,
       event: payload.event,
     };
   }

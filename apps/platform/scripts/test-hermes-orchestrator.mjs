@@ -207,9 +207,13 @@ async function runTests() {
     const streamResult = JSON.parse(streamOut.trim());
 
     check(streamResult.success === true, "Superfluid tool execution succeeded");
-    check(streamResult.status === "STREAM_OPENED", "Superfluid stream status is STREAM_OPENED");
-    check(typeof streamResult.txHash === "string" && streamResult.txHash.startsWith("0x"), "Valid Base Sepolia txHash generated");
-    check(streamResult.basescanUrl?.includes("sepolia.basescan.org"), "Explorer URL points to Base Sepolia");
+    check(typeof streamResult.txHash === "string" && streamResult.txHash.length > 0, "Valid transaction identifier returned");
+    if (streamResult.mode === "live") {
+      check(streamResult.basescanUrl?.includes("sepolia.basescan.org"), "Live explorer URL points to Base Sepolia");
+    } else {
+      check(streamResult.mode === "simulated", "Superfluid unconfigured correctly marked SIMULATED");
+      check(!streamResult.basescanUrl, "Simulation never produces BaseScan URL");
+    }
 
     // Query back stream balance from Superfluid MCP
     const balanceArgs = JSON.stringify({

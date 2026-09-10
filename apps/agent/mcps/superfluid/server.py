@@ -87,6 +87,108 @@ _active_streams: dict[str, dict[str, Any]] = _load_streams()
 
 
 
+def _submit_onchain_cfa_transaction(action_type: str, token_address: str, receiver: str, flow_rate: int = 0) -> dict[str, Any] | None:
+    """Attempt genuine on-chain CFA stream transaction via Base Sepolia Web3 provider if private key configured."""
+    pk = os.environ.get("SUPERFLUID_PRIVATE_KEY") or os.environ.get("EVM_OPERATOR_PRIVATE_KEY")
+    if not pk:
+        return None
+    try:
+        from web3 import Web3
+        w3 = Web3(Web3.HTTPProvider(BASE_SEPOLIA_RPC))
+        if not w3.is_connected():
+            return None
+        account = w3.eth.account.from_key(pk)
+        cfa_address = Web3.to_checksum_address(CFA_FORWARDER_ADDRESS)
+        token = Web3.to_checksum_address(token_address or DEFAULT_FUSDCX_ADDRESS)
+        recip = Web3.to_checksum_address(receiver)
+
+        cfa_abi = [
+            {
+                "inputs": [
+                    {"name": "token", "type": "address"},
+                    {"name": "sender", "type": "address"},
+                    {"name": "receiver", "type": "address"},
+                    {"name": "flowRate", "type": "int96"},
+                    {"name": "userData", "type": "bytes"}
+                ],
+                "name": "createFlow",
+                "outputs": [{"name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "token", "type": "address"},
+                    {"name": "sender", "type": "address"},
+                    {"name": "receiver", "type": "address"},
+                    {"name": "flowRate", "type": "int96"},
+                    {"name": "userData", "type": "bytes"}
+                ],
+                "name": "updateFlow",
+                "outputs": [{"name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "token", "type": "address"},
+                    {"name": "sender", "type": "address"},
+                    {"name": "receiver", "type": "address"},
+                    {"name": "userData", "type": "bytes"}
+                ],
+                "name": "deleteFlow",
+                "outputs": [{"name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            }
+        ]
+        contract = w3.eth.contract(address=cfa_address, abi=cfa_abi)
+        nonce = w3.eth.get_transaction_count(account.address)
+
+        if action_type == "create":
+            tx = contract.functions.createFlow(token, account.address, recip, int(flow_rate), b"").build_transaction({
+                "from": account.address,
+                "nonce": nonce,
+                "gas": 350000,
+                "maxFeePerGas": w3.to_wei(2, "gwei"),
+                "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
+                "chainId": 84532,
+            })
+        elif action_type == "update":
+            tx = contract.functions.updateFlow(token, account.address, recip, int(flow_rate), b"").build_transaction({
+                "from": account.address,
+                "nonce": nonce,
+                "gas": 350000,
+                "maxFeePerGas": w3.to_wei(2, "gwei"),
+                "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
+                "chainId": 84532,
+            })
+        elif action_type == "delete":
+            tx = contract.functions.deleteFlow(token, account.address, recip, b"").build_transaction({
+                "from": account.address,
+                "nonce": nonce,
+                "gas": 350000,
+                "maxFeePerGas": w3.to_wei(2, "gwei"),
+                "maxPriorityFeePerGas": w3.to_wei(1, "gwei"),
+                "chainId": 84532,
+            })
+        else:
+            return None
+
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key=pk)
+        tx_hash_bytes = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_hash = tx_hash_bytes.hex()
+        return {
+            "mode": "live",
+            "txHash": tx_hash,
+            "basescanUrl": f"https://sepolia.basescan.org/tx/{tx_hash}",
+            "explorerUrl": f"https://sepolia.basescan.org/tx/{tx_hash}",
+        }
+    except Exception as exc:
+        print(f"[Superfluid] On-chain transaction error: {exc}", file=sys.stderr)
+        return None
+
+
 @mcp.tool()
 def create_yield_stream(
     token_address: str,
@@ -106,7 +208,10 @@ def create_yield_stream(
         property_id: Unique property identifier.
     """
     token = token_address or DEFAULT_FUSDCX_ADDRESS
-    tx_hash = f"0x{int(time.time()):x}{os.urandom(20).hex()}"
+    onchain = _submit_onchain_cfa_transaction("create", token, receiver, flow_rate)
+    is_live = onchain is not None
+    tx_hash = onchain["txHash"] if is_live else f"sim_cfa_create_{property_id}"
+    basescan_url = onchain["basescanUrl"] if is_live else None
 
     stream_key = f"{property_id}:{receiver.lower()}"
     stream_data = {
@@ -118,6 +223,7 @@ def create_yield_stream(
         "startedAt": int(time.time()),
         "status": "ACTIVE",
         "txHash": tx_hash,
+        "mode": "live" if is_live else "simulated",
     }
     current_streams = _load_streams()
     current_streams[stream_key] = stream_data
@@ -135,13 +241,15 @@ def create_yield_stream(
 
     return {
         "success": True,
+        "mode": "live" if is_live else "simulated",
         "status": "STREAM_OPENED",
         "propertyId": property_id,
         "receiver": receiver,
         "flowRate": flow_rate,
         "token": token,
         "txHash": tx_hash,
-        "basescanUrl": f"https://sepolia.basescan.org/tx/{tx_hash}",
+        "basescanUrl": basescan_url,
+        "explorerUrl": basescan_url,
     }
 
 
@@ -161,22 +269,29 @@ def update_flow_rate(
         property_id: Unique property identifier.
     """
     token = token_address or DEFAULT_FUSDCX_ADDRESS
-    stream_key = f"{property_id}:{receiver.lower()}"
+    onchain = _submit_onchain_cfa_transaction("update", token, receiver, flow_rate)
+    is_live = onchain is not None
+    tx_hash = onchain["txHash"] if is_live else f"sim_cfa_update_{property_id}"
+    basescan_url = onchain["basescanUrl"] if is_live else None
 
-    tx_hash = f"0x{int(time.time()):x}{os.urandom(20).hex()}"
+    stream_key = f"{property_id}:{receiver.lower()}"
     current_streams = _load_streams()
     if stream_key in current_streams:
         current_streams[stream_key]["flowRate"] = flow_rate
         current_streams[stream_key]["updatedAt"] = int(time.time())
+        current_streams[stream_key]["mode"] = "live" if is_live else "simulated"
         _save_streams(current_streams)
 
     return {
         "success": True,
+        "mode": "live" if is_live else "simulated",
         "status": "STREAM_UPDATED",
         "propertyId": property_id,
         "receiver": receiver,
         "flowRate": flow_rate,
         "txHash": tx_hash,
+        "basescanUrl": basescan_url,
+        "explorerUrl": basescan_url,
     }
 
 
@@ -193,22 +308,30 @@ def delete_stream(
         receiver: Investor's EVM wallet address.
         property_id: Unique property identifier.
     """
-    stream_key = f"{property_id}:{receiver.lower()}"
-    tx_hash = f"0x{int(time.time()):x}{os.urandom(20).hex()}"
+    token = token_address or DEFAULT_FUSDCX_ADDRESS
+    onchain = _submit_onchain_cfa_transaction("delete", token, receiver, 0)
+    is_live = onchain is not None
+    tx_hash = onchain["txHash"] if is_live else f"sim_cfa_delete_{property_id}"
+    basescan_url = onchain["basescanUrl"] if is_live else None
 
+    stream_key = f"{property_id}:{receiver.lower()}"
     current_streams = _load_streams()
     if stream_key in current_streams:
         current_streams[stream_key]["status"] = "CLOSED"
         current_streams[stream_key]["flowRate"] = 0
         current_streams[stream_key]["closedAt"] = int(time.time())
+        current_streams[stream_key]["mode"] = "live" if is_live else "simulated"
         _save_streams(current_streams)
 
     return {
         "success": True,
+        "mode": "live" if is_live else "simulated",
         "status": "STREAM_DELETED",
         "propertyId": property_id,
         "receiver": receiver,
         "txHash": tx_hash,
+        "basescanUrl": basescan_url,
+        "explorerUrl": basescan_url,
     }
 
 
