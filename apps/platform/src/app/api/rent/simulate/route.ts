@@ -29,22 +29,25 @@ export async function POST(req: NextRequest) {
     const simulatedTxId = `sim_calc_${propertyId}_${Date.now()}`;
 
     // Anchor simulation calculation record to Hedera Consensus Service audit log
-    const hcsReceipt = await logHcsAuditEvent({
-      event: "TENANT_RENT_SIMULATION_CALCULATED",
-      propertyId,
-      amount: `$${amount} USD (SIMULATED)`,
-      txId: simulatedTxId,
-      metadata: {
-        isSimulation: true,
-        fundsMoved: false,
-        tenant: tenantName,
-        monthlyRate: amount,
-        calculatedFlowRate: flowRatePerSecNum,
-        mode: "simulated",
-        description: simulationMessage,
-        disclaimer: "Demo simulation only - no on-chain funds transferred to YieldVault",
+    const hcsReceipt = await logHcsAuditEvent(
+      {
+        event: "TENANT_RENT_SIMULATION_CALCULATED",
+        propertyId,
+        amount: `$${amount} USD (SIMULATED)`,
+        txId: simulatedTxId,
+        metadata: {
+          isSimulation: true,
+          fundsMoved: false,
+          tenant: tenantName,
+          monthlyRate: amount,
+          calculatedFlowRate: flowRatePerSecNum,
+          mode: "simulated",
+          description: simulationMessage,
+          disclaimer: "Demo simulation only - no on-chain funds transferred to YieldVault",
+        },
       },
-    });
+      { isSimulation: true }
+    );
 
     // Update stream calculation in local SQLite repository with strictly SIMULATED status
     const defaultReceiver = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";

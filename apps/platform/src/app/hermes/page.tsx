@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { HcsAuditBadge } from "@/components/HcsAuditBadge";
+import { HcsAuditReceipt } from "@/lib/hedera/hcsAudit";
 import { McpActivityTimeline, McpTimelineEntry } from "@/components/McpActivityTimeline";
 import { McpActionStatus } from "@/lib/mcp/mcpClient";
 
@@ -57,12 +58,7 @@ export default function HermesConsolePage() {
   const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
   const [timelineEntries, setTimelineEntries] = useState<McpTimelineEntry[]>([]);
   const [viewLayout, setViewLayout] = useState<"split" | "timeline" | "terminal">("split");
-  const [latestAudit, setLatestAudit] = useState<{
-    topicId: string;
-    sequenceNumber?: number;
-    txId?: string;
-    mode?: "live" | "simulated";
-  } | null>(null);
+  const [latestAudit, setLatestAudit] = useState<HcsAuditReceipt | null>(null);
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
@@ -267,9 +263,15 @@ export default function HermesConsolePage() {
                   if (rcpt) {
                     setLatestAudit({
                       topicId: rcpt.topicId || "0.0.4491823",
-                      sequenceNumber: rcpt.sequenceNumber,
-                      txId: rcpt.txId,
+                      sequence: rcpt.sequence ?? rcpt.sequenceNumber,
+                      sequenceNumber: rcpt.sequenceNumber ?? rcpt.sequence,
+                      transactionId: rcpt.transactionId ?? rcpt.txId,
+                      txId: rcpt.txId ?? rcpt.transactionId,
                       mode: rcpt.mode || (rcpt.txId?.startsWith("sim_") ? "simulated" : "live"),
+                      status: rcpt.status || (rcpt.error ? "failed" : "confirmed"),
+                      explorerUrl: rcpt.explorerUrl || rcpt.hashscanUrl,
+                      hashscanUrl: rcpt.hashscanUrl || rcpt.explorerUrl,
+                      error: rcpt.error,
                     });
                   }
                 }
@@ -373,9 +375,15 @@ export default function HermesConsolePage() {
           if (rcpt) {
             setLatestAudit({
               topicId: rcpt.topicId || "0.0.4491823",
-              sequenceNumber: rcpt.sequenceNumber,
-              txId: rcpt.txId,
+              sequence: rcpt.sequence ?? rcpt.sequenceNumber,
+              sequenceNumber: rcpt.sequenceNumber ?? rcpt.sequence,
+              transactionId: rcpt.transactionId ?? rcpt.txId,
+              txId: rcpt.txId ?? rcpt.transactionId,
               mode: rcpt.mode || (rcpt.txId?.startsWith("sim_") ? "simulated" : "live"),
+              status: rcpt.status || (rcpt.error ? "failed" : "confirmed"),
+              explorerUrl: rcpt.explorerUrl || rcpt.hashscanUrl,
+              hashscanUrl: rcpt.hashscanUrl || rcpt.explorerUrl,
+              error: rcpt.error,
             });
           }
         }
@@ -837,9 +845,14 @@ export default function HermesConsolePage() {
           {latestAudit ? (
             <HcsAuditBadge
               topicId={latestAudit.topicId}
+              sequence={latestAudit.sequence}
               sequenceNumber={latestAudit.sequenceNumber}
+              transactionId={latestAudit.transactionId}
               txId={latestAudit.txId}
               mode={latestAudit.mode}
+              status={latestAudit.status}
+              explorerUrl={latestAudit.explorerUrl || latestAudit.hashscanUrl}
+              error={latestAudit.error}
             />
           ) : (
             <div className="p-4 bg-neutral-50 border border-dashed border-neutral-300 text-xs text-neutral-600 flex items-center justify-between">

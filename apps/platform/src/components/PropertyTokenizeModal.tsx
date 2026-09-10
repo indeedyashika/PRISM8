@@ -509,8 +509,14 @@ export function PropertyTokenizeModal({
             )}
             <HcsAuditBadge
               topicId={verificationResult.hcsAudit?.topicId}
+              sequence={verificationResult.hcsAudit?.sequence}
               sequenceNumber={verificationResult.hcsAudit?.sequenceNumber}
+              transactionId={verificationResult.hcsAudit?.transactionId}
               txId={verificationResult.hcsAudit?.txId}
+              mode={verificationResult.hcsAudit?.mode}
+              status={verificationResult.hcsAudit?.status}
+              error={verificationResult.hcsAudit?.error}
+              explorerUrl={verificationResult.hcsAudit?.explorerUrl || verificationResult.hcsAudit?.hashscanUrl}
             />
           </div>
         )}

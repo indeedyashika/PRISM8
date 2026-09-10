@@ -71,10 +71,16 @@ export async function handlePropertyOracleRequest(body, proof) {
   // Verifiable HCS audit receipt representation
   const hcsAudit = {
     mode: isSimulatedPayment ? "simulated" : "live",
+    status: isSimulatedPayment ? "confirmed" : (process.env.HEDERA_OPERATOR_KEY ? "confirmed" : "failed"),
     topicId: process.env.HEDERA_AUDIT_TOPIC_ID || "0.0.4491823",
-    sequenceNumber: isSimulatedPayment ? 0 : 1,
+    sequence: isSimulatedPayment ? undefined : 1,
+    sequenceNumber: isSimulatedPayment ? undefined : 1,
     consensusTimestamp: new Date().toISOString(),
+    transactionId: proof.paymentTx,
     txId: proof.paymentTx,
+    explorerUrl: isSimulatedPayment
+      ? undefined
+      : `https://hashscan.io/testnet/transaction/${encodeURIComponent(proof.paymentTx)}`,
     hashscanUrl: isSimulatedPayment
       ? undefined
       : `https://hashscan.io/testnet/transaction/${encodeURIComponent(proof.paymentTx)}`,

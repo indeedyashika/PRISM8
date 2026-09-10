@@ -41,7 +41,7 @@ export interface OracleVerificationResult {
 }
 
 export interface OracleResponse {
-  status: 200 | 400 | 402;
+  status: 200 | 400 | 402 | 500;
   error?: string;
   x402?: X402Challenge;
   data?: OracleVerificationResult;
@@ -119,20 +119,39 @@ export async function handlePropertyOracleRequest(
     !process.env.HEDERA_OPERATOR_KEY;
 
   // Generate verifiable HCS audit receipt on Hedera Consensus Service
-  const hcsAudit = await logHcsAuditEvent({
-    event: "X402_PAYMENT_VERIFIED",
-    propertyId: addressHash,
-    addressHash,
-    txId: proof.paymentTx,
-    payer: proof.invoiceId,
-    amount: "0.5 HBAR",
-    metadata: {
-      standardizedAddress,
-      dpvConfirmation,
-      invoiceId: proof.invoiceId,
-      mode: isSimulatedPayment ? "simulated" : "live",
+  const hcsAudit = await logHcsAuditEvent(
+    {
+      event: "X402_PAYMENT_VERIFIED",
+      propertyId: addressHash,
+      addressHash,
+      txId: proof.paymentTx,
+      payer: proof.invoiceId,
+      amount: "0.5 HBAR",
+      metadata: {
+        standardizedAddress,
+        dpvConfirmation,
+        invoiceId: proof.invoiceId,
+        mode: isSimulatedPayment ? "simulated" : "live",
+      },
     },
-  });
+    { isSimulation: isSimulatedPayment }
+  );
+
+  if (!isSimulatedPayment && hcsAudit.status === "failed") {
+    return {
+      status: 500,
+      error: `HCS Audit Confirmation Failed: ${hcsAudit.error || "Unknown HCS error"}`,
+      data: {
+        isValid: false,
+        mode: "live",
+        dpvConfirmation: "N",
+        standardizedAddress,
+        addressHash,
+        hcsAudit,
+        verificationTimestamp: new Date().toISOString(),
+      },
+    };
+  }
 
   return {
     status: 200,

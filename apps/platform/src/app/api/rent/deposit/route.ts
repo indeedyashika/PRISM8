@@ -117,24 +117,27 @@ export async function POST(req: NextRequest) {
     const basescanUrl = `https://sepolia.basescan.org/tx/${txHash}`;
 
     // Anchor real on-chain deposit receipt to Hedera Consensus Service audit log
-    const hcsReceipt = await logHcsAuditEvent({
-      event: "TENANT_RENT_DEPOSITED_ONCHAIN",
-      propertyId,
-      amount: `$${amount} USD (CONFIRMED)`,
-      txId: txHash,
-      metadata: {
-        mode: "live",
-        isSimulation: false,
-        fundsMoved: true,
-        tenant: tenantName,
-        amountUsd: amount,
-        txHash,
-        blockNumber,
-        network: "Base Sepolia",
-        chainId: BASE_SEPOLIA_CHAIN_ID,
-        basescanUrl,
+    const hcsReceipt = await logHcsAuditEvent(
+      {
+        event: "TENANT_RENT_DEPOSITED_ONCHAIN",
+        propertyId,
+        amount: `$${amount} USD (CONFIRMED)`,
+        txId: txHash,
+        metadata: {
+          mode: "live",
+          isSimulation: false,
+          fundsMoved: true,
+          tenant: tenantName,
+          amountUsd: amount,
+          txHash,
+          blockNumber,
+          network: "Base Sepolia",
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          basescanUrl,
+        },
       },
-    });
+      { isSimulation: false }
+    );
 
     // Update the live stream record in SQLite with real on-chain confirmation
     const { flowRateWeiPerSec, flowRatePerSecNum } = calculateFlowRate(amount, 10.0);

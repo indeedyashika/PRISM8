@@ -128,8 +128,11 @@ export function deriveShortResult(server: string, tool: string, result: any, isE
       }
       return result.isValid ? "DPV = Y" : "DPV = N";
     case "store_verified_hash":
+      if (result.hcsAudit?.status === "failed") return "HCS Failed";
       if (result.sequenceNumber) return `HCS #${result.sequenceNumber}`;
+      if (result.hcsAudit?.sequence) return `HCS #${result.hcsAudit.sequence}`;
       if (result.hcsAudit?.sequenceNumber) return `HCS #${result.hcsAudit.sequenceNumber}`;
+      if (result.hcsAudit?.mode === "simulated") return "HCS Simulated";
       return "Hash Anchored";
     case "deploy_token":
       if (result.tokenId) return `Token ${result.tokenId}`;

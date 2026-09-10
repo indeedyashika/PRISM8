@@ -271,17 +271,20 @@ export async function executeHermesMission(
         .createHash("sha256")
         .update(`${property.street}|${property.city}|${property.state}|${property.zip}`)
         .digest("hex")}`;
+    const hcsStatus = verificationData.hcsAudit?.status;
     const isStep1Live =
       !isSimulation &&
       verificationData.mode === "live" &&
-      Boolean(verificationData.hcsAudit?.hashscanUrl) &&
+      hcsStatus !== "failed" &&
+      Boolean(verificationData.hcsAudit?.explorerUrl || verificationData.hcsAudit?.hashscanUrl) &&
       !verificationData.hcsAudit?.txId?.startsWith("sim_");
     const paymentTxId = isStep1Live
-      ? verificationData.hcsAudit?.txId
-      : (verificationData.hcsAudit?.txId || "sim_x402_settlement");
+      ? (verificationData.hcsAudit?.transactionId || verificationData.hcsAudit?.txId)
+      : (isSimulation ? (verificationData.hcsAudit?.txId || "sim_x402_settlement") : undefined);
     const step1Explorer = isStep1Live && paymentTxId
-      ? verificationData.hcsAudit?.hashscanUrl
+      ? (verificationData.hcsAudit?.explorerUrl || verificationData.hcsAudit?.hashscanUrl)
       : undefined;
+    const isStep1Failed = !isSimulation && (hcsStatus === "failed" || !verificationData.isValid);
 
     steps.push({
       stepNumber: 1,
@@ -289,12 +292,14 @@ export async function executeHermesMission(
       mcpServer: "usps_chainlink",
       mcpTool: "validate_property_address",
       network: "Hedera Testnet",
-      status: isStep1Live ? "CONFIRMED" : "SIMULATED",
+      status: isStep1Failed ? "FAILED" : (isStep1Live ? "CONFIRMED" : "SIMULATED"),
       mode: isStep1Live ? "live" : "simulated",
       txId: paymentTxId,
-      shortResult: uspsCall.event.shortResult,
+      shortResult: isStep1Failed ? "FAILED" : uspsCall.event.shortResult,
       explorerUrl: step1Explorer,
-      detail: `Settled 0.5 HBAR micropayment via Blocky402. USPS DPV confirmed: Code ${verificationData.dpvConfirmation || "Y"}.`,
+      detail: isStep1Failed
+        ? `x402 payment settlement failed: ${verificationData.hcsAudit?.error || "Validation failed"}`
+        : `Settled 0.5 HBAR micropayment via Blocky402. USPS DPV confirmed: Code ${verificationData.dpvConfirmation || "Y"}.`,
       timestamp: new Date().toISOString(),
     });
 
@@ -315,14 +320,18 @@ export async function executeHermesMission(
     );
     events.push(storeHashCall.event);
 
+    const isStep2Failed = !isSimulation && (hcsStatus === "failed" || Boolean(verificationData.hcsAudit?.error));
+    const hcsSeq = verificationData.hcsAudit?.sequence ?? verificationData.hcsAudit?.sequenceNumber;
     const isStep2Live =
       !isSimulation &&
       verificationData.hcsAudit?.mode === "live" &&
-      Boolean(verificationData.hcsAudit?.hashscanUrl) &&
-      (verificationData.hcsAudit?.sequenceNumber ?? 0) > 0;
-    const hcsSeq = verificationData.hcsAudit?.sequenceNumber || 0;
+      hcsStatus === "confirmed" &&
+      Boolean(verificationData.hcsAudit?.explorerUrl || verificationData.hcsAudit?.hashscanUrl) &&
+      (hcsSeq !== undefined && hcsSeq > 0);
     const hcsTopic = verificationData.hcsAudit?.topicId || "0.0.4491823";
-    const step2Explorer = isStep2Live ? `https://hashscan.io/testnet/topic/${hcsTopic}` : undefined;
+    const step2Explorer = isStep2Live
+      ? (verificationData.hcsAudit?.explorerUrl || `https://hashscan.io/testnet/topic/${hcsTopic}`)
+      : undefined;
 
     steps.push({
       stepNumber: 2,
@@ -330,15 +339,17 @@ export async function executeHermesMission(
       mcpServer: "usps_chainlink",
       mcpTool: "store_verified_hash",
       network: `Hedera Testnet (HCS Topic ${hcsTopic})`,
-      status: isStep2Live ? "IMMUTABLE_LOGGED" : "SIMULATED",
+      status: isStep2Failed ? "FAILED" : (isStep2Live ? "IMMUTABLE_LOGGED" : "SIMULATED"),
       mode: isStep2Live ? "live" : "simulated",
-      txId: paymentTxId,
-      sequenceNumber: hcsSeq > 0 ? hcsSeq : undefined,
-      shortResult: storeHashCall.event.shortResult,
+      txId: isStep2Live ? paymentTxId : (isSimulation ? "sim_x402_settlement" : undefined),
+      sequenceNumber: isStep2Live ? hcsSeq : undefined,
+      shortResult: isStep2Failed ? "HCS FAILED" : storeHashCall.event.shortResult,
       explorerUrl: step2Explorer,
-      detail: hcsSeq > 0
-        ? `Consensus sequence #${hcsSeq} anchored on HCS Topic ${hcsTopic} with address hash ${addressHash.slice(0, 12)}...`
-        : `Consensus audit recorded for address hash ${addressHash.slice(0, 12)}...`,
+      detail: isStep2Failed
+        ? `Hedera Consensus Service audit failed: ${verificationData.hcsAudit?.error || "Live submission rejected"}`
+        : (isStep2Live
+            ? `Consensus sequence #${hcsSeq} anchored on HCS Topic ${hcsTopic} with address hash ${addressHash.slice(0, 12)}...`
+            : `Simulated consensus audit recorded for address hash ${addressHash.slice(0, 12)}...`),
       timestamp: verificationData.hcsAudit?.consensusTimestamp || new Date().toISOString(),
     });
 
@@ -649,12 +660,22 @@ export async function executeHermesMission(
     );
     events.push(uspsCall.event);
 
-    const isUspsLive = !isSimulation && uspsCall.data?.mode === "live" && Boolean(uspsCall.data?.hcsAudit?.hashscanUrl);
-    const uspsTxId = isUspsLive ? uspsCall.data?.hcsAudit?.txId : (isSimulation ? "sim_x402_settlement" : uspsCall.data?.hcsAudit?.txId);
-    const uspsExplorerUrl = isUspsLive ? uspsCall.data?.hcsAudit?.hashscanUrl : undefined;
+    const hcsStatus = uspsCall.data?.hcsAudit?.status;
+    const isUspsFailed = !isSimulation && (hcsStatus === "failed" || !uspsCall.success);
+    const isUspsLive =
+      !isSimulation &&
+      uspsCall.data?.mode === "live" &&
+      hcsStatus === "confirmed" &&
+      Boolean(uspsCall.data?.hcsAudit?.explorerUrl || uspsCall.data?.hcsAudit?.hashscanUrl);
+    const uspsTxId = isUspsLive
+      ? (uspsCall.data?.hcsAudit?.transactionId || uspsCall.data?.hcsAudit?.txId)
+      : (isSimulation ? "sim_x402_settlement" : undefined);
+    const uspsExplorerUrl = isUspsLive
+      ? (uspsCall.data?.hcsAudit?.explorerUrl || uspsCall.data?.hcsAudit?.hashscanUrl)
+      : undefined;
 
     return {
-      success: uspsCall.success,
+      success: !isUspsFailed,
       executionId,
       agentId: "hermes-agentic-operator",
       sessionId,
@@ -667,17 +688,21 @@ export async function executeHermesMission(
           mcpServer: "usps_chainlink",
           mcpTool: "validate_property_address",
           network: "Hedera Testnet x402",
-          status: isUspsLive ? "VERIFIED" : (uspsCall.success ? "SIMULATED" : "FAILED"),
+          status: isUspsFailed ? "FAILED" : (isUspsLive ? "VERIFIED" : "SIMULATED"),
           mode: isUspsLive ? "live" : "simulated",
-          shortResult: uspsCall.event.shortResult,
+          shortResult: isUspsFailed ? "FAILED" : uspsCall.event.shortResult,
           txId: uspsTxId,
           explorerUrl: uspsExplorerUrl,
-          detail: uspsCall.event.resultSummary,
+          detail: isUspsFailed
+            ? `USPS Deliverability Check failed: ${uspsCall.data?.hcsAudit?.error || "Error occurred"}`
+            : uspsCall.event.resultSummary,
           timestamp: new Date().toISOString(),
         },
       ],
       events,
-      summary: uspsCall.event.resultSummary,
+      summary: isUspsFailed
+        ? `USPS Deliverability Check failed: ${uspsCall.data?.hcsAudit?.error || "Error occurred"}`
+        : uspsCall.event.resultSummary,
       completedAt: new Date().toISOString(),
     };
   }
@@ -696,16 +721,20 @@ export async function executeHermesMission(
     const txId = payoutResult.txId;
     const scheduleExplorerUrl = isScheduleLive ? payoutResult.hashscanUrl : undefined;
 
-    const hcsReceipt = await logHcsAuditEvent({
-      event: "HIP_423_SCHEDULE_CREATED",
-      propertyId: "prop_456_oak_ave",
-      txId,
-      amount: "3800 USD",
-      metadata: { scheduleId, payoutCadence: "MONTHLY_1ST", mode: payoutResult.mode },
-    });
+    const hcsReceipt = await logHcsAuditEvent(
+      {
+        event: "HIP_423_SCHEDULE_CREATED",
+        propertyId: "prop_456_oak_ave",
+        txId,
+        amount: "3800 USD",
+        metadata: { scheduleId, payoutCadence: "MONTHLY_1ST", mode: payoutResult.mode },
+      },
+      { isSimulation }
+    );
 
-    const isHcsLive = isScheduleLive && hcsReceipt.mode === "live" && Boolean(hcsReceipt.hashscanUrl);
-    const effectiveExplorerUrl = scheduleExplorerUrl || (isHcsLive ? hcsReceipt.hashscanUrl : undefined);
+    const isHcsFailed = !isSimulation && hcsReceipt.status === "failed";
+    const isHcsLive = !isSimulation && hcsReceipt.mode === "live" && hcsReceipt.status === "confirmed" && Boolean(hcsReceipt.explorerUrl || hcsReceipt.hashscanUrl);
+    const effectiveExplorerUrl = isHcsLive ? (hcsReceipt.explorerUrl || hcsReceipt.hashscanUrl || scheduleExplorerUrl) : undefined;
 
     const event: McpExecutionEvent = {
       id: `mcp_evt_${Date.now()}`,
