@@ -5,9 +5,9 @@
     "receiver": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "flowRate": 1466049382716,
     "monthlyRentEquivUsd": 3.8,
-    "startedAt": 1789048355,
+    "startedAt": 1789048982,
     "status": "ACTIVE",
-    "txHash": "0x6aa2b6238def501bc32fb7857192fdc22e4887f1ff0e8f80"
+    "txHash": "0x6aa2b896abc060b2dc3dfe9d621ebebfed515413bc7686cd"
   },
   "prop_456_oak_ave:0x70997970c51812dc3a010c7d01b50e0d17dc79c8": {
     "propertyId": "prop_456_oak_ave",

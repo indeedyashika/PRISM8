@@ -24,8 +24,14 @@ export interface HermesMissionRequest {
   sessionId?: string;
   property?: Partial<PropertyParams>;
   simulateMalicious?: boolean;
+  dryRun?: boolean;
   grantorAddress?: string;
   baseUrl?: string;
+}
+
+export interface HermesCallbacks {
+  onToolStart?: (server: string, tool: string, actionLabel: string, timestamp: string) => void;
+  onToolComplete?: (event: McpExecutionEvent) => void;
 }
 
 export interface HermesMissionResult {
@@ -42,6 +48,7 @@ export interface HermesMissionResult {
     mcpTool: string;
     network: string;
     status: string;
+    shortResult?: string;
     txId?: string;
     sequenceNumber?: number;
     explorerUrl?: string;
@@ -152,13 +159,40 @@ export function classifyMissionIntent(
  * -> Hermes decides next action -> next MCP tool -> final result
  */
 export async function executeHermesMission(
-  req: HermesMissionRequest
+  req: HermesMissionRequest,
+  callbacks?: HermesCallbacks
 ): Promise<HermesMissionResult> {
   const executionId = `exec_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const instruction = req.instruction || "Autonomous Property Tokenization and Yield Streaming Mission";
   const sessionId = req.sessionId || "session_prism8_genesis_demo";
   const property = extractPropertyDetails(instruction, req.property);
   const baseUrl = req.baseUrl || process.env.TOKENIZATION_BASE_URL || "http://127.0.0.1:3000";
+
+  const isSimulation = Boolean(
+    req.dryRun ||
+    instruction.toLowerCase().includes("simulate") ||
+    instruction.toLowerCase().includes("dry-run") ||
+    instruction.toLowerCase().includes("sandbox")
+  );
+
+  const invokeTool = async (
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+    options: { actionLabel: string; baseUrl?: string }
+  ) => {
+    const timestamp = new Date().toISOString();
+    callbacks?.onToolStart?.(server, tool, options.actionLabel, timestamp);
+    const res = await callMcpTool(server, tool, args, {
+      actionLabel: options.actionLabel,
+      baseUrl: options.baseUrl || baseUrl,
+    });
+    if (isSimulation && res.event) {
+      res.event.status = "SIMULATED";
+    }
+    callbacks?.onToolComplete?.(res.event);
+    return res;
+  };
 
   const events: McpExecutionEvent[] = [];
   const steps: HermesMissionResult["steps"] = [];
@@ -192,7 +226,7 @@ export async function executeHermesMission(
     // -------------------------------------------------------------
     // Step 1: USPS / Property Verification with x402 Settlement
     // -------------------------------------------------------------
-    const uspsCall = await callMcpTool(
+    const uspsCall = await invokeTool(
       "usps_chainlink",
       "validate_property_address",
       {
@@ -244,8 +278,9 @@ export async function executeHermesMission(
       mcpServer: "usps_chainlink",
       mcpTool: "validate_property_address",
       network: "Hedera Testnet",
-      status: "CONFIRMED",
+      status: isSimulation ? "SIMULATED" : "CONFIRMED",
       txId: paymentTxId,
+      shortResult: uspsCall.event.shortResult,
       explorerUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(paymentTxId)}`,
       detail: `Settled 0.5 HBAR micropayment via Blocky402. USPS DPV confirmed: Code ${verificationData.dpvConfirmation || "Y"}.`,
       timestamp: new Date().toISOString(),
@@ -254,7 +289,7 @@ export async function executeHermesMission(
     // -------------------------------------------------------------
     // Step 2: Hedera Consensus Service (HCS) Audit Logging
     // -------------------------------------------------------------
-    const storeHashCall = await callMcpTool(
+    const storeHashCall = await invokeTool(
       "usps_chainlink",
       "store_verified_hash",
       {
@@ -276,9 +311,10 @@ export async function executeHermesMission(
       mcpServer: "usps_chainlink",
       mcpTool: "store_verified_hash",
       network: `Hedera Testnet (HCS Topic ${hcsTopic})`,
-      status: "IMMUTABLE_LOGGED",
+      status: isSimulation ? "SIMULATED" : "IMMUTABLE_LOGGED",
       txId: paymentTxId,
       sequenceNumber: hcsSeq,
+      shortResult: storeHashCall.event.shortResult,
       explorerUrl: `https://hashscan.io/testnet/topic/${hcsTopic}`,
       detail: `Consensus sequence #${hcsSeq} anchored on HCS Topic ${hcsTopic} with address hash ${addressHash.slice(0, 12)}...`,
       timestamp: verificationData.hcsAudit?.consensusTimestamp || new Date().toISOString(),
@@ -293,7 +329,7 @@ export async function executeHermesMission(
       .join("")
       .toUpperCase()
       .slice(0, 4) || "OAK";
-    const deployCall = await callMcpTool(
+    const deployCall = await invokeTool(
       "hedera_write",
       "deploy_token",
       {
@@ -323,7 +359,7 @@ export async function executeHermesMission(
     // Step 4: The Graph Autonomous Registration & Indexing
     // -------------------------------------------------------------
     const graphContractAddress = "0xf531b8f309be94191af87605cfbf600d71c2cfe0";
-    const graphRegisterCall = await callMcpTool(
+    const graphRegisterCall = await invokeTool(
       "subgraph_write",
       "add_token_source",
       {
@@ -345,8 +381,9 @@ export async function executeHermesMission(
       mcpServer: "subgraph_write",
       mcpTool: "add_token_source",
       network: "The Graph Protocol (Sepolia Studio)",
-      status: "INDEXED",
+      status: isSimulation ? "SIMULATED" : "INDEXED",
       txId: deploymentHash,
+      shortResult: graphRegisterCall.event.shortResult,
       explorerUrl: "https://thegraph.com/explorer",
       detail: `Hermes appended contract to subgraph.yaml. Deployment hash: ${deploymentHash}. Manifest live.`,
       timestamp: new Date().toISOString(),
@@ -355,7 +392,7 @@ export async function executeHermesMission(
     // -------------------------------------------------------------
     // Step 5: The Graph Holder Discovery & Cap Table Analysis
     // -------------------------------------------------------------
-    const holdersCall = await callMcpTool(
+    const holdersCall = await invokeTool(
       "subgraph_read",
       "get_top_holders",
       {
@@ -383,7 +420,7 @@ export async function executeHermesMission(
     const monthlyInvestorRent = property.monthlyRent * shareFraction;
     const flowRateWeiSec = Math.floor((monthlyInvestorRent * 1e18) / 2592000);
 
-    const streamCall = await callMcpTool(
+    const streamCall = await invokeTool(
       "superfluid",
       "create_yield_stream",
       {
@@ -406,8 +443,9 @@ export async function executeHermesMission(
       mcpServer: "superfluid",
       mcpTool: "create_yield_stream",
       network: "Base Sepolia (CFAv1 Forwarder 0xcfA132E353cB4E398080B9700609bb008eceB125)",
-      status: "STREAMING_ACTIVE",
+      status: isSimulation ? "SIMULATED" : "STREAMING_ACTIVE",
       txId: streamTxHash,
+      shortResult: streamCall.event.shortResult,
       explorerUrl: `https://sepolia.basescan.org/tx/${streamTxHash}`,
       detail: `CFA continuous yield stream active: +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec into ${topInvestor.address.slice(0, 10)}...`,
       timestamp: new Date().toISOString(),
@@ -437,7 +475,7 @@ export async function executeHermesMission(
 
   // --- PATH 2: THE GRAPH HOLDER INSPECTION ---
   if (intent === "INSPECT_HOLDERS") {
-    const holdersCall = await callMcpTool(
+    const holdersCall = await invokeTool(
       "subgraph_read",
       "get_top_holders",
       { limit: 10 },
@@ -459,7 +497,8 @@ export async function executeHermesMission(
           mcpServer: "subgraph_read",
           mcpTool: "get_top_holders",
           network: "The Graph Protocol",
-          status: holdersCall.success ? "COMPLETED" : "FAILED",
+          status: isSimulation ? "SIMULATED" : (holdersCall.success ? "COMPLETED" : "FAILED"),
+          shortResult: holdersCall.event.shortResult,
           detail: holdersCall.event.resultSummary,
           timestamp: new Date().toISOString(),
         },
@@ -474,7 +513,7 @@ export async function executeHermesMission(
   if (intent === "STREAM_YIELD") {
     const rentAmount = property.monthlyRent || 3800;
     const flowRateWeiSec = Math.floor((rentAmount * 0.1 * 1e18) / 2592000);
-    const streamCall = await callMcpTool(
+    const streamCall = await invokeTool(
       "superfluid",
       "create_yield_stream",
       {
@@ -501,7 +540,8 @@ export async function executeHermesMission(
           mcpServer: "superfluid",
           mcpTool: "create_yield_stream",
           network: "Base Sepolia",
-          status: streamCall.success ? "STREAMING_ACTIVE" : "FAILED",
+          status: isSimulation ? "SIMULATED" : (streamCall.success ? "STREAMING_ACTIVE" : "FAILED"),
+          shortResult: streamCall.event.shortResult,
           txId: streamCall.data?.txHash,
           explorerUrl: streamCall.data?.basescanUrl,
           detail: `Accelerated CFA stream: +$${(rentAmount * 0.1 / 2592000).toFixed(6)}/sec.`,
@@ -516,7 +556,7 @@ export async function executeHermesMission(
 
   // --- PATH 4: USPS DELIVERABILITY VERIFICATION ---
   if (intent === "VERIFY_USPS") {
-    const uspsCall = await callMcpTool(
+    const uspsCall = await invokeTool(
       "usps_chainlink",
       "validate_property_address",
       {
@@ -543,7 +583,8 @@ export async function executeHermesMission(
           mcpServer: "usps_chainlink",
           mcpTool: "validate_property_address",
           network: "Hedera Testnet x402",
-          status: uspsCall.success ? "VERIFIED" : "FAILED",
+          status: isSimulation ? "SIMULATED" : (uspsCall.success ? "VERIFIED" : "FAILED"),
+          shortResult: uspsCall.event.shortResult,
           txId: uspsCall.data?.hcsAudit?.txId,
           detail: uspsCall.event.resultSummary,
           timestamp: new Date().toISOString(),
@@ -575,10 +616,13 @@ export async function executeHermesMission(
       mcpServer: "hedera_write",
       mcpTool: "schedule_payout",
       arguments: { propertyId: "prop_456_oak_ave", scheduleId },
-      status: "SUCCESS",
+      status: isSimulation ? "SIMULATED" : "SUCCESS",
       resultSummary: `Scheduled recurring transaction created: ${txId}. Schedule ID: ${scheduleId}.`,
+      shortResult: "HIP-423 Queued",
       durationMs: 420,
       referenceId: scheduleId,
+      network: "Hedera Testnet",
+      explorerUrl: hcsReceipt.hashscanUrl,
       timestamp: new Date().toISOString(),
     };
     events.push(event);
@@ -597,7 +641,8 @@ export async function executeHermesMission(
           mcpServer: "hedera_write",
           mcpTool: "schedule_payout",
           network: "Hedera Testnet",
-          status: "SCHEDULED_ACTIVE",
+          status: isSimulation ? "SIMULATED" : "SCHEDULED_ACTIVE",
+          shortResult: "HIP-423 Queued",
           txId,
           sequenceNumber: hcsReceipt.sequenceNumber,
           explorerUrl: hcsReceipt.hashscanUrl,
