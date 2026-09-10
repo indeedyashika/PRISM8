@@ -13,17 +13,21 @@ export function RentSimulatorPanel({
   defaultRentAmount = 3800,
   onDepositSuccess,
 }: RentSimulatorPanelProps) {
+  const [activeMode, setActiveMode] = useState<"simulate" | "live">("simulate");
   const [rentAmount, setRentAmount] = useState<number>(defaultRentAmount);
-  const [isDepositing, setIsDepositing] = useState<boolean>(false);
-  const [depositResult, setDepositResult] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleDepositRent = async () => {
-    setIsDepositing(true);
+  const handleExecute = async () => {
+    setIsLoading(true);
     setError(null);
+    setResult(null);
+
+    const endpoint = activeMode === "simulate" ? "/api/rent/simulate" : "/api/rent/deposit";
 
     try {
-      const res = await fetch("/api/rent/simulate", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -34,37 +38,74 @@ export function RentSimulatorPanel({
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Deposit simulation failed");
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || data.error || "Action failed");
       }
 
-      setDepositResult(data);
+      setResult(data);
       if (onDepositSuccess) {
         onDepositSuccess(rentAmount, data);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to trigger rent deposit");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to execute rent action";
+      setError(msg);
     } finally {
-      setIsDepositing(false);
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="flex flex-col justify-between h-full font-mono text-black space-y-3">
-      {/* Top Status Header */}
+      {/* Mode Switch Tabs */}
       <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
-          <span className="font-bold text-black">INFLOW SIMULATOR</span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMode("simulate");
+              setResult(null);
+              setError(null);
+            }}
+            className={`px-2 py-0.5 text-[11px] font-bold border transition cursor-pointer ${
+              activeMode === "simulate"
+                ? "bg-black text-white border-black"
+                : "bg-white text-neutral-600 border-neutral-200 hover:border-black"
+            }`}
+          >
+            SIMULATION
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMode("live");
+              setResult(null);
+              setError(null);
+            }}
+            className={`px-2 py-0.5 text-[11px] font-bold border transition cursor-pointer ${
+              activeMode === "live"
+                ? "bg-black text-white border-black"
+                : "bg-white text-neutral-600 border-neutral-200 hover:border-black"
+            }`}
+          >
+            LIVE DEPOSIT
+          </button>
         </div>
-        <span className="text-[10px] px-2 py-0.5 bg-neutral-100 border border-neutral-300 text-black">
-          ACH → fUSDCx
-        </span>
+
+        {activeMode === "simulate" ? (
+          <span className="text-[10px] px-1.5 py-0.5 bg-neutral-100 border border-neutral-300 text-neutral-600 font-medium">
+            NO FUNDS MOVED
+          </span>
+        ) : (
+          <span className="text-[10px] px-1.5 py-0.5 bg-emerald-50 border border-emerald-300 text-emerald-800 font-bold flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            ON-CHAIN
+          </span>
+        )}
       </div>
 
       {/* Preset Amount Chips */}
       <div className="flex items-center justify-between gap-1 text-[11px]">
-        <span className="text-neutral-500 text-[10px]">Presets:</span>
+        <span className="text-neutral-500 text-[10px]">Amount:</span>
         <div className="flex gap-1.5">
           {[1500, 3800, 5200].map((amt) => (
             <button
@@ -83,7 +124,7 @@ export function RentSimulatorPanel({
         </div>
       </div>
 
-      {/* Deposit Input & Trigger */}
+      {/* Input & Execution Trigger */}
       <div className="bg-neutral-50 p-2.5 border border-neutral-200 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -97,35 +138,70 @@ export function RentSimulatorPanel({
             />
           </div>
           <button
-            onClick={handleDepositRent}
-            disabled={isDepositing || rentAmount <= 0}
+            onClick={handleExecute}
+            disabled={isLoading || rentAmount <= 0}
             className="bg-black text-white px-3 py-1.5 text-xs font-bold border border-black hover:bg-neutral-800 disabled:opacity-40 transition cursor-pointer whitespace-nowrap"
           >
-            {isDepositing ? "Injecting..." : "Inject Rent"}
+            {isLoading
+              ? activeMode === "simulate"
+                ? "Simulating..."
+                : "Submitting..."
+              : activeMode === "simulate"
+              ? `Simulate $${rentAmount.toLocaleString()} rent inflow`
+              : `Submit Live Deposit`}
           </button>
         </div>
       </div>
 
       {/* Audit Confirmation Status */}
-      {depositResult ? (
+      {result ? (
         <div className="text-[10px] bg-neutral-100 border border-neutral-300 p-2 space-y-1">
-          <div className="flex justify-between font-bold text-black">
-            <span>✓ ${depositResult.amountDeposited?.toLocaleString()} Inflow Injected</span>
-            <span>Flow Accelerated</span>
-          </div>
-          <div className="flex justify-between text-neutral-600 border-t border-neutral-200 pt-1">
-            <span>HCS Receipt:</span>
-            <span className="font-mono text-black font-bold">Seq #{depositResult.hcsAudit?.sequenceNumber || "83527"} ↗</span>
-          </div>
+          {result.mode === "simulated" ? (
+            <>
+              <div className="flex justify-between font-bold text-black">
+                <span>✓ Simulating ${result.simulatedRentAmount?.toLocaleString()} rent inflow</span>
+                <span className="text-neutral-500 font-normal">[SIMULATION]</span>
+              </div>
+              <div className="text-neutral-600 text-[10px]">
+                Calculation complete · No funds moved
+              </div>
+              <div className="flex justify-between text-neutral-600 border-t border-neutral-200 pt-1">
+                <span>Calculated Rate:</span>
+                <span className="font-mono text-black font-bold">
+                  +${result.calculatedFlowRate?.toFixed(7)}/sec
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between font-bold text-emerald-800">
+                <span>Rent deposit submitted</span>
+                <span>Transaction confirmed</span>
+              </div>
+              <div className="flex items-center justify-between text-neutral-600 border-t border-neutral-200 pt-1">
+                <span>BaseScan:</span>
+                <a
+                  href={result.basescanUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-black underline font-bold"
+                >
+                  {result.txHash?.slice(0, 14)}... ↗
+                </a>
+              </div>
+            </>
+          )}
         </div>
       ) : error ? (
-        <div className="text-[10px] bg-neutral-100 border border-neutral-400 p-2 text-black">
-          {error}
+        <div className="text-[10px] bg-red-50 border border-red-300 p-2 text-red-900 leading-tight">
+          <span className="font-bold">Error:</span> {error}
         </div>
       ) : (
         <div className="text-[10px] text-neutral-500 border-t border-neutral-200 pt-2 flex justify-between">
-          <span>Target Contract:</span>
-          <span className="text-black font-bold">Base Sepolia YieldVault</span>
+          <span>Target Rail:</span>
+          <span className="text-black font-bold">
+            {activeMode === "simulate" ? "Deterministic Flow Forecaster" : "Base Sepolia YieldVault"}
+          </span>
         </div>
       )}
     </div>

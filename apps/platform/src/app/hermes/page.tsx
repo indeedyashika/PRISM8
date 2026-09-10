@@ -599,11 +599,11 @@ export default function HermesConsolePage() {
               1. The Graph: Inspect Top Holders
             </button>
             <button
-              onClick={() => handleRunCommand("Superfluid: Simulate Rent Deposit & Accelerate Stream")}
+              onClick={() => handleRunCommand("Superfluid: Simulating $3,800 rent inflow")}
               disabled={isExecuting}
               className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:border-black text-black text-xs transition cursor-pointer"
             >
-              2. Superfluid: Accelerate Yield Flow
+              2. Superfluid: Simulating $3,800 rent inflow
             </button>
             <button
               onClick={() => handleRunCommand("Hedera: Verify USPS Property via x402 Micropayment")}

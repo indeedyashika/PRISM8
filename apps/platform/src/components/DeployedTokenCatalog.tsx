@@ -106,7 +106,7 @@ export default function DeployedTokenCatalog({ tokens }: { tokens: TokenRecord[]
                 </span>
               </div>
               <p className="text-xs text-neutral-600 font-mono mb-4 min-h-[32px]">
-                Simulate tenant rent deposit ($3,800) converting into yield streams.
+                Simulate tenant rent inflow calculations ($3,800) or submit verified live rent deposit into YieldVault.
               </p>
               <div className="ad402-slot mb-4 min-h-[260px] flex flex-col justify-between">
                 <RentSimulatorPanel

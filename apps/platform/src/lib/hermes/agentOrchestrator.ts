@@ -484,24 +484,32 @@ export async function executeHermesMission(
     const isStep6Live = !isSimulation && streamCall.data?.mode === "live" && Boolean(streamCall.data?.basescanUrl);
     const streamTxHash = isStep6Live ? streamCall.data?.txHash : (isSimulation ? "sim_cfa_stream" : streamCall.data?.txHash);
     const streamExplorerUrl = isStep6Live ? streamCall.data?.basescanUrl : undefined;
+    const step6ShortResult = isStep6Live ? "Transaction confirmed" : `Simulating $${property.monthlyRent.toLocaleString()} rent inflow`;
+    const step6Detail = isStep6Live
+      ? `Rent deposit submitted. Transaction confirmed on Base Sepolia. CFA continuous yield stream active: +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec into ${topInvestor.address.slice(0, 10)}...`
+      : `Simulating $${property.monthlyRent.toLocaleString()} rent inflow (demo calculation only, no funds moved). Flow rate: +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec.`;
 
     steps.push({
       stepNumber: 4,
-      name: "Superfluid CFA Per-Second Yield Stream Creation",
+      name: isStep6Live ? "Superfluid Live Rent Deposit" : "Superfluid Rent Simulation",
       mcpServer: "superfluid",
       mcpTool: "create_yield_stream",
       network: "Base Sepolia (CFAv1 Forwarder 0xcfA132E353cB4E398080B9700609bb008eceB125)",
       status: isStep6Live ? "STREAMING_ACTIVE" : (streamCall.success ? "SIMULATED" : "FAILED"),
       mode: isStep6Live ? "live" : "simulated",
       txId: streamTxHash,
-      shortResult: streamCall.event.shortResult,
+      shortResult: step6ShortResult,
       explorerUrl: streamExplorerUrl,
-      detail: `CFA continuous yield stream active: +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec into ${topInvestor.address.slice(0, 10)}...`,
+      detail: step6Detail,
       timestamp: new Date().toISOString(),
     });
 
     // Commit 0.5 HBAR spend to session policy
     const updatedSession = commitSessionSpend(sessionId, 0.5, true);
+
+    const summaryText = isStep6Live
+      ? `Flagship tokenization mission complete. USPS deliverability confirmed via x402, Hedera audit anchored (Seq #${hcsSeq}), The Graph indexed ${holders.length} holders. Rent deposit submitted. Transaction confirmed on Base Sepolia (+${(monthlyInvestorRent / 2592000).toFixed(8)}/sec).`
+      : `Flagship tokenization mission evaluated. USPS deliverability confirmed via x402, Hedera audit anchored (Seq #${hcsSeq}), The Graph indexed ${holders.length} holders. Simulating $${property.monthlyRent.toLocaleString()} rent inflow (stream calculated at +${(monthlyInvestorRent / 2592000).toFixed(8)}/sec).`;
 
     return {
       success: true,
@@ -517,7 +525,7 @@ export async function executeHermesMission(
       sessionRemainingHbar: Math.max(0, updatedSession.constraints.maxSpendHbar - updatedSession.spentHbar),
       steps,
       events,
-      summary: `Flagship tokenization mission complete. USPS deliverability confirmed via x402, Hedera audit anchored (Seq #${hcsSeq}), The Graph indexed ${holders.length} holders, and Superfluid stream is live at +$${(monthlyInvestorRent / 2592000).toFixed(8)}/sec.`,
+      summary: summaryText,
       completedAt: new Date().toISOString(),
     };
   }
@@ -558,10 +566,16 @@ export async function executeHermesMission(
     };
   }
 
-  // --- PATH 3: SUPERFLUID STREAM INFLOW / ACCELERATION ---
+  // --- PATH 3: SUPERFLUID STREAM INFLOW / RENT SIMULATION VS LIVE DEPOSIT ---
   if (intent === "STREAM_YIELD") {
     const rentAmount = property.monthlyRent || 3800;
     const flowRateWeiSec = Math.floor((rentAmount * 0.1 * 1e18) / 2592000);
+    const flowRateNumSec = (rentAmount * 0.1) / 2592000;
+
+    const actionLabel = isSimulation
+      ? `Superfluid: Simulating $${rentAmount.toLocaleString()} rent inflow`
+      : "Superfluid: Rent deposit submitted";
+
     const streamCall = await invokeTool(
       "superfluid",
       "create_yield_stream",
@@ -571,13 +585,25 @@ export async function executeHermesMission(
         flow_rate: flowRateWeiSec,
         property_id: "prop_456_oak_ave",
       },
-      { actionLabel: "Superfluid: Inflow Yield & Accelerate Stream", baseUrl }
+      { actionLabel, baseUrl }
     );
     events.push(streamCall.event);
 
     const isStreamLive = !isSimulation && streamCall.data?.mode === "live" && Boolean(streamCall.data?.basescanUrl);
     const streamTxHash = isStreamLive ? streamCall.data?.txHash : (isSimulation ? "sim_cfa_stream" : streamCall.data?.txHash);
     const streamExplorerUrl = isStreamLive ? streamCall.data?.basescanUrl : undefined;
+
+    const shortResult = isStreamLive
+      ? "Transaction confirmed"
+      : `Simulating $${rentAmount.toLocaleString()} rent inflow`;
+
+    const detail = isStreamLive
+      ? "Rent deposit submitted. Transaction confirmed on Base Sepolia."
+      : `Simulating $${rentAmount.toLocaleString()} rent inflow (demo calculation only, no funds moved). Flow rate: +$${flowRateNumSec.toFixed(7)}/sec.`;
+
+    const summary = isStreamLive
+      ? "Rent deposit submitted. Transaction confirmed."
+      : `Simulating $${rentAmount.toLocaleString()} rent inflow. Calculated CFA stream rate: +$${flowRateNumSec.toFixed(7)}/sec.`;
 
     return {
       success: streamCall.success,
@@ -589,21 +615,21 @@ export async function executeHermesMission(
       steps: [
         {
           stepNumber: 1,
-          name: "Superfluid CFA Stream Acceleration",
+          name: isStreamLive ? "Superfluid Live Rent Deposit" : "Superfluid Rent Simulation",
           mcpServer: "superfluid",
           mcpTool: "create_yield_stream",
           network: "Base Sepolia",
           status: isStreamLive ? "STREAMING_ACTIVE" : (streamCall.success ? "SIMULATED" : "FAILED"),
           mode: isStreamLive ? "live" : "simulated",
-          shortResult: streamCall.event.shortResult,
+          shortResult,
           txId: streamTxHash,
           explorerUrl: streamExplorerUrl,
-          detail: `Accelerated CFA stream: +$${(rentAmount * 0.1 / 2592000).toFixed(6)}/sec.`,
+          detail,
           timestamp: new Date().toISOString(),
         },
       ],
       events,
-      summary: `Superfluid CFA stream updated: +$${(rentAmount * 0.1 / 2592000).toFixed(6)}/sec.`,
+      summary,
       completedAt: new Date().toISOString(),
     };
   }

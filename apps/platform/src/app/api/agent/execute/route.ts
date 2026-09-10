@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       instruction,
-      action = "FULL_TOKENIZATION_AND_YIELD_PIPELINE",
+      action,
       sessionId = "session_prism8_genesis_demo",
       property = {
         street: "456 Oak Avenue",

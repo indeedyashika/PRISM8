@@ -174,7 +174,11 @@ export function InvestorStreamDashboard({
     }
   };
 
-  const isLive = stream?.mode === "live";
+  const isLive =
+    stream?.mode === "live" &&
+    Boolean(stream?.txHash) &&
+    !stream?.txHash?.startsWith("sim_") &&
+    stream?.txHash !== "null";
   const isStreamActive = stream?.status === "ACTIVE";
   const flowRateUsdPerSec = flowRatePerSecRef.current || ((monthlyRent * sharePercentage) / 100) / 2592000;
   const investorMonthlyRent = (monthlyRent * sharePercentage) / 100;
